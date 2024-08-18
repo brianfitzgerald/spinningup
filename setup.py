@@ -15,10 +15,10 @@ setup(
     version=__version__,#'0.1',
     install_requires=[
         'cloudpickle==1.2.1',
-        'gym[atari,box2d,classic_control]~=0.15.3',
+        'gymnasium[all]',
         'ipython',
         'joblib',
-        'matplotlib==3.1.1',
+        'matplotlib',
         'mpi4py',
         'numpy',
         'pandas',

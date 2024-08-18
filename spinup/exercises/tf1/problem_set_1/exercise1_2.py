@@ -93,7 +93,7 @@ if __name__ == '__main__':
 
     from spinup import ppo_tf1 as ppo
     from spinup.exercises.common import print_result
-    import gym
+    import gymnasium
     import os
     import pandas as pd
     import psutil
