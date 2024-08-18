@@ -28,10 +28,12 @@ def mpi_fork(n, bind_to_core=False):
             OMP_NUM_THREADS="1",
             IN_MPI="1"
         )
-        args = ["mpirun", "-np", str(n)]
+        # workaround for permissions issue on mac
+        args = ["mpirun", "-np", str(n), "--allow-run-as-root"]
         if bind_to_core:
             args += ["-bind-to", "core"]
         args += [sys.executable] + sys.argv
+        print(" ".join(args))
         subprocess.check_call(args, env=env)
         sys.exit()
 

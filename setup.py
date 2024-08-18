@@ -14,7 +14,7 @@ setup(
     py_modules=['spinup'],
     version=__version__,#'0.1',
     install_requires=[
-        'cloudpickle==1.2.1',
+        'cloudpickle',
         'gymnasium[all]',
         'ipython',
         'joblib',
