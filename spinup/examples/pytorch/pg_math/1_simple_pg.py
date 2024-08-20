@@ -7,6 +7,8 @@ import gymnasium
 from gymnasium.spaces import Discrete, Box
 import fire
 from typing import List
+from gymnasium.wrappers.record_video import RecordVideo
+from gymnasium.wrappers.time_limit import TimeLimit
 
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
@@ -30,27 +32,29 @@ def reward_to_go(rewards):
 
 
 def train(
-    env_name="CartPole-v1",
-    hidden_sizes: List[int] = [32],
+    env_name="LunarLander-v2",
+    hidden_sizes: List[int] = [32, 64, 32],
     lr: float = 1e-2,
-    epochs: int = 50,
+    epochs: int = 250,
     batch_size: int = 5000,
     render: bool = False,
     rtg: bool = True,
 ):
 
     # make environment, check spaces, get obs / act dims
-    render_mode = "human" if render else None
-    env = gymnasium.make(env_name, render_mode=render_mode)
+    render_mode = "human" if render else "rgb_array"
+    base_env = gymnasium.make(env_name, render_mode=render_mode)
+    base_env = TimeLimit(base_env, max_episode_steps=200)
+    record_env = RecordVideo(base_env, f"videos/{env_name}")
     assert isinstance(
-        env.observation_space, Box
+        base_env.observation_space, Box
     ), "This example only works for envs with continuous state spaces."
     assert isinstance(
-        env.action_space, Discrete
+        base_env.action_space, Discrete
     ), "This example only works for envs with discrete action spaces."
 
-    obs_dim = env.observation_space.shape[0]
-    n_acts = env.action_space.n
+    obs_dim = base_env.observation_space.shape[0]
+    n_acts = base_env.action_space.n
 
     # make core of policy network
     logits_net = mlp(sizes=[obs_dim] + hidden_sizes + [n_acts])
@@ -73,7 +77,7 @@ def train(
     optimizer = Adam(logits_net.parameters(), lr=lr)
 
     # for training policy
-    def train_one_epoch():
+    def train_one_epoch(env: gymnasium.Env):
         # make some empty lists for logging.
         batch_obs = []  # for observations
         batch_acts = []  # for actions
@@ -143,11 +147,15 @@ def train(
 
     # training loop
     for i in range(epochs):
-        batch_loss, batch_rets, batch_lens = train_one_epoch()
+        batch_loss, batch_rets, batch_lens = train_one_epoch(base_env)
         print(
             "epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f"
             % (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens))
         )
+        if i % 50 == 0:
+            train_one_epoch(record_env)
+
+    base_env.close()
 
 
 if __name__ == "__main__":
