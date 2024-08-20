@@ -5,6 +5,7 @@ from torch.optim import Adam
 import numpy as np
 import gymnasium
 from gymnasium.spaces import Discrete, Box
+import fire
 
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
@@ -17,7 +18,7 @@ def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
 
 
 def train(
-    env_name="CartPole-v0",
+    env_name="CartPole-v1",
     hidden_sizes=[32],
     lr=1e-2,
     epochs=50,
@@ -26,7 +27,8 @@ def train(
 ):
 
     # make environment, check spaces, get obs / act dims
-    env = gymnasium.make(env_name)
+    render_mode = "human" if render else None
+    env = gymnasium.make(env_name, render_mode=render_mode)
     assert isinstance(
         env.observation_space, Box
     ), "This example only works for envs with continuous state spaces."
@@ -133,12 +135,4 @@ def train(
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env_name", "--env", type=str, default="CartPole-v0")
-    parser.add_argument("--render", action="store_true")
-    parser.add_argument("--lr", type=float, default=1e-2)
-    args = parser.parse_args()
-    print("\nUsing simplest formulation of policy gradient.\n")
-    train(env_name=args.env_name, render=args.render, lr=args.lr)
+    fire.Fire(train)

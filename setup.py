@@ -15,6 +15,7 @@ setup(
     version=__version__,#'0.1',
     install_requires=[
         'cloudpickle',
+        'fire',
         'gymnasium[all]',
         'ipython',
         'joblib',
