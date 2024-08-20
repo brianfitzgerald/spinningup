@@ -6,6 +6,7 @@ import numpy as np
 import gymnasium
 from gymnasium.spaces import Discrete, Box
 import fire
+from typing import List
 
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
@@ -17,13 +18,25 @@ def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
     return nn.Sequential(*layers)
 
 
+def reward_to_go(rewards):
+    """
+    Discount rewards to only consider the rewards that come after the current time step.
+    """
+    n = len(rewards)
+    rtgs = np.zeros_like(rewards)
+    for i in reversed(range(n)):
+        rtgs[i] = rewards[i] + (rtgs[i + 1] if i + 1 < n else 0)
+    return rtgs
+
+
 def train(
     env_name="CartPole-v1",
-    hidden_sizes=[32],
-    lr=1e-2,
-    epochs=50,
-    batch_size=5000,
-    render=False,
+    hidden_sizes: List[int] = [32],
+    lr: float = 1e-2,
+    epochs: int = 50,
+    batch_size: int = 5000,
+    render: bool = False,
+    rtg: bool = True,
 ):
 
     # make environment, check spaces, get obs / act dims
@@ -101,7 +114,10 @@ def train(
                 batch_lens.append(ep_len)
 
                 # the weight for each logprob(a|s) is R(tau)
-                batch_weights += [ep_ret] * ep_len
+                if rtg:
+                    batch_weights += list(reward_to_go(ep_rews))
+                else:
+                    batch_weights += [ep_ret] * ep_len
 
                 # reset episode-specific variables
                 obs, _ = env.reset()
