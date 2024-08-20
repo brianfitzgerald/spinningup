@@ -35,7 +35,7 @@ def train(
     env_name="LunarLander-v2",
     hidden_sizes: List[int] = [32, 64, 32],
     lr: float = 1e-2,
-    epochs: int = 250,
+    epochs: int = 100,
     batch_size: int = 5000,
     render: bool = False,
     rtg: bool = True,
@@ -43,8 +43,7 @@ def train(
 
     # make environment, check spaces, get obs / act dims
     render_mode = "human" if render else "rgb_array"
-    base_env = gymnasium.make(env_name, render_mode=render_mode)
-    base_env = TimeLimit(base_env, max_episode_steps=200)
+    base_env = gymnasium.make(env_name, render_mode=render_mode, max_episode_steps=200)
     record_env = RecordVideo(base_env, f"videos/{env_name}")
     assert isinstance(
         base_env.observation_space, Box
