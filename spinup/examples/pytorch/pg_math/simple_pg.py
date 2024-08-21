@@ -1,14 +1,16 @@
+import os
+from typing import List
+
+import fire
+import gymnasium
+import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions.categorical import Categorical
-from torch.optim import Adam
-import numpy as np
-import gymnasium
-from gymnasium.spaces import Discrete, Box
-import fire
-from typing import List
+from gymnasium.spaces import Box, Discrete
 from gymnasium.wrappers.record_video import RecordVideo
 from gymnasium.wrappers.time_limit import TimeLimit
+from torch.distributions.categorical import Categorical
+from torch.optim import Adam
 
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
@@ -35,15 +37,15 @@ def train(
     env_name="LunarLander-v2",
     hidden_sizes: List[int] = [32, 64, 32],
     lr: float = 1e-2,
-    epochs: int = 100,
+    epochs: int = 1000,
     batch_size: int = 5000,
-    render: bool = False,
+    record_every: int = 5,
     rtg: bool = True,
 ):
 
     # make environment, check spaces, get obs / act dims
-    render_mode = "human" if render else "rgb_array"
-    base_env = gymnasium.make(env_name, render_mode=render_mode, max_episode_steps=200)
+    base_env = gymnasium.make(env_name, render_mode="rgb_array")
+    base_env = TimeLimit(base_env, max_episode_steps=1000)
     record_env = RecordVideo(base_env, f"videos/{env_name}")
     assert isinstance(
         base_env.observation_space, Box
@@ -96,7 +98,7 @@ def train(
         while True:
 
             # rendering
-            if (not finished_rendering_this_epoch) and render:
+            if not finished_rendering_this_epoch:
                 env.render()
 
             # save obs
@@ -104,7 +106,9 @@ def train(
 
             # act in the environment
             act = get_action(torch.as_tensor(obs, dtype=torch.float32))
-            obs, rew, done, _, _ = env.step(act)
+            obs, rew, done, truncated, info = env.step(act)
+            if truncated:
+                done = True
 
             # save action, reward
             batch_acts.append(act)
@@ -128,6 +132,7 @@ def train(
 
                 # won't render again this epoch
                 finished_rendering_this_epoch = True
+                # print(f"Batch obs: {len(batch_obs)}, required size: {batch_size}")
 
                 # end experience loop if we have enough of it
                 if len(batch_obs) > batch_size:
@@ -146,13 +151,11 @@ def train(
 
     # training loop
     for i in range(epochs):
-        batch_loss, batch_rets, batch_lens = train_one_epoch(base_env)
+        batch_loss, batch_rets, batch_lens = train_one_epoch(record_env)
         print(
             "epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f"
             % (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens))
         )
-        if i % 50 == 0:
-            train_one_epoch(record_env)
 
     base_env.close()
 
