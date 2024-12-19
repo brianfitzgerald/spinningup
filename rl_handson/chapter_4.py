@@ -22,6 +22,7 @@ import torch.optim as optim
 from tensorboardX import SummaryWriter
 from torch import Tensor
 import torch.nn.functional as F
+from gymnasium import Env
 
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
@@ -51,7 +52,7 @@ class EpisodeStep:
     action: int
 
 
-def iterate_batches(env, net, batch_size):
+def iterate_batches(env: Env, net: nn.Module, batch_size: int):
     """
     perform actions on the environment and collect the results
     until the episode is done, i.e. the environment terminates
@@ -59,16 +60,19 @@ def iterate_batches(env, net, batch_size):
     batch = []
     episode_reward = 0.0
     episode_steps = []
-    obs = env.reset()
+    obs, _ = env.reset()
     while True:
-        obs_v = torch.FloatTensor(obs[0])
+        print(obs)
+        obs_v = torch.FloatTensor(obs)
         act_probs_v: Tensor = F.softmax(net(obs_v), dim=0)
         act_probs = act_probs_v.data.numpy()
         action = np.random.choice(len(act_probs), p=act_probs)
-        next_obs, reward, is_done, _, _ = env.step(action)
+        next_obs, reward, terminated, truncated, _ = env.step(action)
+        print(f"obs: {obs}, action: {action}, reward: {reward}")
+        print(f"terminated: {terminated}, truncated: {truncated}")
         episode_reward += reward
         episode_steps.append(EpisodeStep(observation=obs, action=action))
-        if is_done:
+        if terminated or truncated:
             batch.append(Episode(reward=episode_reward, steps=episode_steps))
             episode_reward = 0.0
             episode_steps = []
