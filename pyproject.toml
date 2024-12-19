@@ -23,6 +23,7 @@ dependencies = [
     "seaborn==0.8.1",
     "torch",
     "tqdm",
+    "tensorboardx>=2.6.2.2",
 ]
 
 [tool.setuptools]
