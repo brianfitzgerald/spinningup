@@ -11,7 +11,7 @@ Randomly sample a probability distribution for an action at each timestep
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
 
 import fire
 import gymnasium
@@ -24,6 +24,7 @@ from torch import Tensor
 import torch.nn.functional as F
 from gymnasium import Env, ObservationWrapper
 from gymnasium.wrappers import RecordVideo
+from gymnasium.spaces import Box, Discrete
 from loguru import logger
 from typing import Literal
 
@@ -39,6 +40,9 @@ class Net(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+EnvironmentChoice = Literal["cartpole", "frozenlake"]
 
 
 @dataclass
@@ -83,50 +87,49 @@ def iterate_batches(env: Env, net: nn.Module, batch_size: int):
         obs = next_obs
 
 
-def filter_batch(batch: List[Episode], percentile: float):
+def filter_batch(
+    batch: List[Episode],
+    percentile: float,
+    gamma: float = 0.9,
+) -> Tuple[List[Episode], List[np.ndarray], List[int], float]:
     """
     Find a reward boundary that separates the elite episodes from the non-elite episodes,
     and return the elite episodes and the mean reward.
     An elite episode is one that has a reward greater than the reward boundary,
     so it will should be considered 'successful'.
+
+    Optionally discount the reward, to reduce it over each step, which penalizes longer episodes.
     """
-    rewards = list(map(lambda s: s.reward, batch))
+    rewards = list(map(lambda s: s.reward * gamma * len(s.steps), batch))
     reward_bound = np.percentile(rewards, percentile)
     reward_mean = float(np.mean(rewards))
 
-    train_obs = []
-    train_act = []
-    for example in batch:
-        if example.reward < reward_bound:
-            continue
-        train_obs.extend(map(lambda step: step.observation, example.steps))
-        train_act.extend(map(lambda step: step.action, example.steps))
+    train_obs: List[np.ndarray] = []
+    train_act: List[int] = []
+    elite_batch: List[Episode] = []
 
-    train_obs_v = torch.FloatTensor(train_obs)
-    train_act_v = torch.LongTensor(train_act)
-    return train_obs_v, train_act_v, reward_bound, reward_mean
+    for example, reward in zip(batch, rewards):
+        if reward > reward_bound:
+            train_obs.extend(map(lambda step: step.observation, example.steps))
+            train_act.extend(map(lambda step: step.action, example.steps))
+            elite_batch.append(example)
+
+    return elite_batch, train_obs, train_act, reward_bound
 
 
 class DiscreteOneHotWrapper(ObservationWrapper):
     def __init__(self, env: Env):
         super(DiscreteOneHotWrapper, self).__init__(env)
-        assert isinstance(env.observation_space, gymnasium.spaces.Discrete)
+        assert isinstance(env.observation_space, Discrete)
         shape = (env.observation_space.n,)
         # Box is a set of intervals in n-dimensional space
-        self.observation_space: gymnasium.spaces.Box = gymnasium.spaces.Box(0.0, 1.0, shape, dtype=np.float32)
+        self.observation_space: Box = Box(0.0, 1.0, shape, dtype=np.float32)
 
     def observation(self, observation):
         res = np.copy(self.observation_space.low)
-        # set the tile we are on to 1.0
+        # set the tile we are on to 1.0, and others to 0.0
         res[observation] = 1.0
         return res
-
-
-HIDDEN_SIZE = 128
-BATCH_SIZE = 16
-PERCENTILE = 70
-
-EnvironmentChoice = Literal["cartpole", "frozenlake"]
 
 
 def main(environment: EnvironmentChoice = "CartPole"):
@@ -134,17 +137,38 @@ def main(environment: EnvironmentChoice = "CartPole"):
     env_name = "CartPole-v1" if environment == "cartpole" else "FrozenLake-v1"
 
     env = gymnasium.make(env_name, render_mode="rgb_array")
-    env = RecordVideo(env, video_folder="videos/chapter_4")
+    if environment == "frozenlake":
+        env = DiscreteOneHotWrapper(env)
+
+    env = RecordVideo(env, video_folder=f"videos/chapter_4/{env_name}")
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
-    net = Net(obs_size, HIDDEN_SIZE, n_actions)
+    if environment == "cartpole":
+        hidden_size = 128
+        batch_size = 16
+        percentile = 70
+    elif environment == "frozenlake":
+        hidden_size = 128
+        batch_size = 16
+        percentile = 70
+
+    net = Net(obs_size, hidden_size, n_actions)
     objective = nn.CrossEntropyLoss()
     optimizer = optim.Adam(params=net.parameters(), lr=0.01)
-    writer = SummaryWriter(comment="-cartpole")
+    writer = SummaryWriter(comment=f"-{environment}")
 
-    for iter_no, batch in enumerate(iterate_batches(env, net, BATCH_SIZE)):
-        obs_v, acts_v, reward_bound, reward_mean = filter_batch(batch, PERCENTILE)
+    full_batch = []
+    for iter_no, batch in enumerate(iterate_batches(env, net, batch_size)):
+        reward_mean = float(np.mean(list(map(lambda s: s.reward, batch))))
+        gamma = 1 if environment == "cartpole" else 0.9
+        full_batch, obs, acts, reward_bound = filter_batch(batch, percentile)
+        if not full_batch:
+            continue
+        obs_v = torch.FloatTensor(obs)
+        acts_v = torch.LongTensor(acts)
+        full_batch = full_batch[-500:]
+
         optimizer.zero_grad()
         # the value scores for each action
         action_scores_v = net(obs_v)
@@ -158,7 +182,7 @@ def main(environment: EnvironmentChoice = "CartPole"):
         writer.add_scalar("loss", loss_v.item(), iter_no)
         writer.add_scalar("reward_bound", reward_bound, iter_no)
         writer.add_scalar("reward_mean", reward_mean, iter_no)
-        if reward_mean >= 500:
+        if reward_mean >= 0.8:
             print("Solved!")
             break
     writer.close()
