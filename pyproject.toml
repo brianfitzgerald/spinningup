@@ -26,6 +26,7 @@ dependencies = [
     "tqdm",
     "tensorboardx>=2.6.2.2",
     "loguru>=0.7.3",
+    "tensorboard>=2.18.0",
 ]
 
 [tool.setuptools]
