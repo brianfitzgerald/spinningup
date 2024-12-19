@@ -7,8 +7,7 @@ import gymnasium
 from gymnasium.spaces import Discrete, Box
 import fire
 from typing import List
-from gymnasium.wrappers.record_video import RecordVideo
-from gymnasium.wrappers.time_limit import TimeLimit
+from gymnasium.wrappers import RecordVideo, TimeLimit
 
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):

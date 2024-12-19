@@ -26,10 +26,6 @@ from gymnasium import Env
 from gymnasium.wrappers import RecordVideo
 from loguru import logger
 
-HIDDEN_SIZE = 128
-BATCH_SIZE = 16
-PERCENTILE = 70
-
 
 class Net(nn.Module):
     def __init__(self, obs_size: int, hidden_size: int, n_actions: int):
@@ -108,9 +104,13 @@ def filter_batch(batch: List[Episode], percentile: float):
     return train_obs_v, train_act_v, reward_bound, reward_mean
 
 
+HIDDEN_SIZE = 128
+BATCH_SIZE = 16
+PERCENTILE = 70
+
 def main():
     env = gymnasium.make("CartPole-v1", render_mode="rgb_array")
-    env = RecordVideo(env, video_folder="videos")
+    env = RecordVideo(env, video_folder="videos/chapter_4")
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
@@ -120,20 +120,21 @@ def main():
     writer = SummaryWriter(comment="-cartpole")
 
     for iter_no, batch in enumerate(iterate_batches(env, net, BATCH_SIZE)):
-        obs_v, acts_v, reward_b, reward_m = filter_batch(batch, PERCENTILE)
+        obs_v, acts_v, reward_bound, reward_mean = filter_batch(batch, PERCENTILE)
         optimizer.zero_grad()
+        # the value scores for each action
         action_scores_v = net(obs_v)
         loss_v = objective(action_scores_v, acts_v)
         loss_v.backward()
         optimizer.step()
         logger.info(
             "%d: loss=%.3f, reward_mean=%.1f, reward_bound=%.1f"
-            % (iter_no, loss_v.item(), reward_m, reward_b)
+            % (iter_no, loss_v.item(), reward_mean, reward_bound)
         )
         writer.add_scalar("loss", loss_v.item(), iter_no)
-        writer.add_scalar("reward_bound", reward_b, iter_no)
-        writer.add_scalar("reward_mean", reward_m, iter_no)
-        if reward_m > 199:
+        writer.add_scalar("reward_bound", reward_bound, iter_no)
+        writer.add_scalar("reward_mean", reward_mean, iter_no)
+        if reward_mean >= 500:
             print("Solved!")
             break
     writer.close()
