@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tensorboardX import SummaryWriter
 from torch import Tensor
+import torch.nn.functional as F
 
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
@@ -31,7 +32,7 @@ class Net(nn.Module):
     def __init__(self, obs_size: int, hidden_size: int, n_actions: int):
         super(Net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(obs_size, 32), nn.ReLU(), nn.Linear(hidden_size, n_actions)
+            nn.Linear(obs_size, hidden_size), nn.ReLU(), nn.Linear(hidden_size, n_actions)
         )
 
     def forward(self, x):
@@ -59,13 +60,12 @@ def iterate_batches(env, net, batch_size):
     episode_reward = 0.0
     episode_steps = []
     obs = env.reset()
-    softmax = nn.Softmax(dim=1)
     while True:
-        obs_v = torch.FloatTensor([obs])
-        act_probs_v: Tensor = softmax(net(obs_v))
-        act_probs = act_probs_v.data.numpy()[0]
+        obs_v = torch.FloatTensor(obs[0])
+        act_probs_v: Tensor = F.softmax(net(obs_v), dim=0)
+        act_probs = act_probs_v.data.numpy()
         action = np.random.choice(len(act_probs), p=act_probs)
-        next_obs, reward, is_done, _ = env.step(action)
+        next_obs, reward, is_done, _, _ = env.step(action)
         episode_reward += reward
         episode_steps.append(EpisodeStep(observation=obs, action=action))
         if is_done:
@@ -104,8 +104,7 @@ def filter_batch(batch: List[Episode], percentile: float):
 
 
 def main():
-    env = gymnasium.make("CartPole-v0")
-    # env = gym.wrappers.Monitor(env, directory="mon", force=True)
+    env = gymnasium.make("CartPole-v1")
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
@@ -132,5 +131,6 @@ def main():
             print("Solved!")
             break
     writer.close()
+
 
 fire.Fire(main)
