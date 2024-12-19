@@ -25,6 +25,7 @@ dependencies = [
     "torch",
     "tqdm",
     "tensorboardx>=2.6.2.2",
+    "loguru>=0.7.3",
 ]
 
 [tool.setuptools]

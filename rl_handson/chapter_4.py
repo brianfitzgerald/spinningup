@@ -23,6 +23,7 @@ from tensorboardX import SummaryWriter
 from torch import Tensor
 import torch.nn.functional as F
 from gymnasium import Env
+from loguru import logger
 
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
@@ -62,14 +63,12 @@ def iterate_batches(env: Env, net: nn.Module, batch_size: int):
     episode_steps = []
     obs, _ = env.reset()
     while True:
-        print(obs)
         obs_v = torch.FloatTensor(obs)
         act_probs_v: Tensor = F.softmax(net(obs_v), dim=0)
         act_probs = act_probs_v.data.numpy()
         action = np.random.choice(len(act_probs), p=act_probs)
         next_obs, reward, terminated, truncated, _ = env.step(action)
-        print(f"obs: {obs}, action: {action}, reward: {reward}")
-        print(f"terminated: {terminated}, truncated: {truncated}")
+        # logger.debug(f"obs: {obs}, action: {action}, reward: {reward} term/trunc: {terminated}/{truncated}")
         episode_reward += reward
         episode_steps.append(EpisodeStep(observation=obs, action=action))
         if terminated or truncated:
@@ -80,6 +79,7 @@ def iterate_batches(env: Env, net: nn.Module, batch_size: int):
             if len(batch) == batch_size:
                 yield batch
                 batch = []
+            next_obs, _ = env.reset()
         obs = next_obs
 
 
@@ -124,7 +124,7 @@ def main():
         loss_v = objective(action_scores_v, acts_v)
         loss_v.backward()
         optimizer.step()
-        print(
+        logger.info(
             "%d: loss=%.3f, reward_mean=%.1f, reward_bound=%.1f"
             % (iter_no, loss_v.item(), reward_m, reward_b)
         )
