@@ -23,6 +23,7 @@ from tensorboardX import SummaryWriter
 from torch import Tensor
 import torch.nn.functional as F
 from gymnasium import Env
+from gymnasium.wrappers import RecordVideo
 from loguru import logger
 
 HIDDEN_SIZE = 128
@@ -108,7 +109,8 @@ def filter_batch(batch: List[Episode], percentile: float):
 
 
 def main():
-    env = gymnasium.make("CartPole-v1")
+    env = gymnasium.make("CartPole-v1", render_mode="rgb_array")
+    env = RecordVideo(env, video_folder="videos")
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
 
