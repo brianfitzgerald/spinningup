@@ -22,16 +22,19 @@ import torch.optim as optim
 from tensorboardX import SummaryWriter
 from torch import Tensor
 import torch.nn.functional as F
-from gymnasium import Env
+from gymnasium import Env, ObservationWrapper
 from gymnasium.wrappers import RecordVideo
 from loguru import logger
+from typing import Literal
 
 
 class Net(nn.Module):
     def __init__(self, obs_size: int, hidden_size: int, n_actions: int):
         super(Net, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(obs_size, hidden_size), nn.ReLU(), nn.Linear(hidden_size, n_actions)
+            nn.Linear(obs_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, n_actions),
         )
 
     def forward(self, x):
@@ -104,12 +107,33 @@ def filter_batch(batch: List[Episode], percentile: float):
     return train_obs_v, train_act_v, reward_bound, reward_mean
 
 
+class DiscreteOneHotWrapper(ObservationWrapper):
+    def __init__(self, env: Env):
+        super(DiscreteOneHotWrapper, self).__init__(env)
+        assert isinstance(env.observation_space, gymnasium.spaces.Discrete)
+        shape = (env.observation_space.n,)
+        # Box is a set of intervals in n-dimensional space
+        self.observation_space: gymnasium.spaces.Box = gymnasium.spaces.Box(0.0, 1.0, shape, dtype=np.float32)
+
+    def observation(self, observation):
+        res = np.copy(self.observation_space.low)
+        # set the tile we are on to 1.0
+        res[observation] = 1.0
+        return res
+
+
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
 PERCENTILE = 70
 
-def main():
-    env = gymnasium.make("CartPole-v1", render_mode="rgb_array")
+EnvironmentChoice = Literal["cartpole", "frozenlake"]
+
+
+def main(environment: EnvironmentChoice = "CartPole"):
+
+    env_name = "CartPole-v1" if environment == "cartpole" else "FrozenLake-v1"
+
+    env = gymnasium.make(env_name, render_mode="rgb_array")
     env = RecordVideo(env, video_folder="videos/chapter_4")
     obs_size = env.observation_space.shape[0]
     n_actions = env.action_space.n
