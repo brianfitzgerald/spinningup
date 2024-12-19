@@ -10,3 +10,4 @@ data/
 _build/
 venv/
 videos/
+.venv

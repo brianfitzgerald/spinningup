@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spinup"
+version = "0.1"                        # Replace with the appropriate version from your version.py file
+authors = [{ name = "Joshua Achiam" }]
+
+dependencies = [
+    "cloudpickle",
+    "fire",
+    "gymnasium[all]",
+    "ipython",
+    "joblib",
+    "matplotlib",
+    "mpi4py",
+    "numpy",
+    "pandas",
+    "pytest",
+    "psutil",
+    "scipy",
+    "seaborn==0.8.1",
+    "torch",
+    "tqdm",
+]
+
+[tool.setuptools]
+py-modules = ["spinup"]
