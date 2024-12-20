@@ -403,6 +403,15 @@ wheels = [
 ]
 
 [[package]]
+name = "gym"
+version = "0.21.0"
+source = { git = "https://github.com/openai/gym.git?rev=9180d12e1b66e7e2a1a622614f787a6ec147ac40#9180d12e1b66e7e2a1a622614f787a6ec147ac40" }
+dependencies = [
+    { name = "cloudpickle" },
+    { name = "numpy" },
+]
+
+[[package]]
 name = "gymnasium"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -472,6 +481,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/ca/8537cdbf1a6852912cb293fa23dc7adf256cec793113485447f0cbf0fe79/imageio_ffmpeg-0.5.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:7fa9132a291d5eb28c44553550deb40cbdab831f2a614e55360301a6582eb205", size = 22880461 },
     { url = "https://files.pythonhosted.org/packages/a9/97/ff7de8ace4425fffc6e8d7646017500c9d5435df608b13cc34de4835ad4f/imageio_ffmpeg-0.5.1-py3-none-win32.whl", hash = "sha256:89efe2c79979d8174ba8476deb7f74d74c331caee3fb2b65ba2883bec0737625", size = 19652102 },
     { url = "https://files.pythonhosted.org/packages/a9/1c/1b9c72bf839def47626436ea5ebaf643404f7850482c5fafd71a3deeaa94/imageio_ffmpeg-0.5.1-py3-none-win_amd64.whl", hash = "sha256:1521e79e253bedbdd36a547e0cbd94a025ba0b558e17f08fea687d805a0e4698", size = 22619891 },
+]
+
+[[package]]
+name = "importlib-metadata"
+version = "4.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "zipp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/55/12/ab288357b884ebc807e3f4eff63ce5ba6b941ba61499071bf19f1bbc7f7f/importlib_metadata-4.13.0.tar.gz", hash = "sha256:dd0173e8f150d6815e098fd354f6414b0f079af4644ddfe90c71e2fc6174346d", size = 50445 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/98/c277899f5aa21f6e6946e1c83f2af650cbfee982763ffb91db07ff7d3a13/importlib_metadata-4.13.0-py3-none-any.whl", hash = "sha256:8a8a81bcf996e74fee46f0d16bd3eaa382a7eb20fd82445c3ad11f4090334116", size = 23010 },
 ]
 
 [[package]]
@@ -1664,6 +1685,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cloudpickle" },
     { name = "fire" },
+    { name = "gym" },
     { name = "gymnasium", extra = ["all"] },
     { name = "ipython" },
     { name = "joblib" },
@@ -1676,6 +1698,7 @@ dependencies = [
     { name = "pytest" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "stable-baselines3" },
     { name = "tensorboard" },
     { name = "tensorboardx" },
     { name = "torch" },
@@ -1686,6 +1709,7 @@ dependencies = [
 requires-dist = [
     { name = "cloudpickle" },
     { name = "fire" },
+    { name = "gym", git = "https://github.com/openai/gym.git?rev=9180d12e1b66e7e2a1a622614f787a6ec147ac40" },
     { name = "gymnasium", extras = ["all"] },
     { name = "ipython" },
     { name = "joblib" },
@@ -1698,10 +1722,29 @@ requires-dist = [
     { name = "pytest" },
     { name = "scipy" },
     { name = "seaborn", specifier = "==0.8.1" },
+    { name = "stable-baselines3", specifier = ">=1.8.0" },
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "tensorboardx", specifier = ">=2.6.2.2" },
     { name = "torch" },
     { name = "tqdm" },
+]
+
+[[package]]
+name = "stable-baselines3"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cloudpickle" },
+    { name = "gym" },
+    { name = "importlib-metadata" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/c6/66ee19437b56f557ea46656b19e3c230028153bfa3b70f8dbe2a2043c08a/stable_baselines3-1.8.0.tar.gz", hash = "sha256:d30241afdfd092ffd85b64b3308670c72fc4834419dd668faf50096fcd5ce6ae", size = 194745 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/76/07/fb80e30764c9caf1c66d20c58ed5dea8c72c07ff7e9957f2ca9b11b2cdc8/stable_baselines3-1.8.0-py3-none-any.whl", hash = "sha256:1614378c14ecbed0f3906d41dd89e61271e5f2059a93d1f73e468dc07e87c00f", size = 174521 },
 ]
 
 [[package]]

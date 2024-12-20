@@ -27,7 +27,12 @@ dependencies = [
     "tensorboardx>=2.6.2.2",
     "loguru>=0.7.3",
     "tensorboard>=2.18.0",
+    "gym",
+    "stable-baselines3>=1.8.0",
 ]
 
 [tool.setuptools]
 py-modules = ["spinup"]
+
+[tool.uv.sources]
+gym = { git = "https://github.com/openai/gym.git", rev = "9180d12e1b66e7e2a1a622614f787a6ec147ac40" }
