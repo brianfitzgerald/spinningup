@@ -270,7 +270,7 @@ def main(device_str: str = "mps", env: str = DEFAULT_ENV_NAME):
     env = gymnasium.make(DEFAULT_ENV_NAME, render_mode="rgb_array")
     env: Env = RecordVideo(env, video_folder=f"videos/chapter_5")
     # scale frame size, clip rewards, and convert to grayscale
-    env = wrap_dqn(env)
+    env = wrap_dqn(env, clip_reward=False, noop_max=0)
 
     net = DQN(env.observation_space.shape, env.action_space.n).to(device)
     tgt_net = DQN(env.observation_space.shape, env.action_space.n).to(device)

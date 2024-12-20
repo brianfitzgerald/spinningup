@@ -5,14 +5,17 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
-from ptan.common.wrappers import ImageToPyTorch
-from stable_baselines3.common.atari_wrappers import (ClipRewardEnv,
-                                                     EpisodicLifeEnv,
-                                                     FireResetEnv,
-                                                     NoopResetEnv,
-                                                     StickyActionEnv,
-                                                     WarpFrame)
+from stable_baselines3.common.atari_wrappers import (
+    NoopResetEnv,
+    StickyActionEnv,
+)
 from stable_baselines3.common.type_aliases import GymStepReturn
+import cv2
+
+"""
+Have to overwrite a lot of environment wrappers from stable_baselines3
+since they use Gym, not Gymnasium, base classes.
+"""
 
 
 class JustSkipEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
@@ -47,6 +50,135 @@ class JustSkipEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
             if done:
                 break
         return obs, total_reward, terminated, truncated, info
+
+
+class EpisodicLifeEnv(gym.Wrapper):
+    """
+    Make end-of-life == end-of-episode, but only reset on true game over.
+    Done by DeepMind for the DQN and co. since it helps value estimation.
+
+    :param env: Environment to wrap
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+        self.lives = 0
+        self.was_real_done = True
+
+    def step(self, action: int) -> GymStepReturn:
+        obs, reward, done, info = self.env.step(action)
+        self.was_real_done = done
+        # check current lives, make loss of life terminal,
+        # then update lives to handle bonus lives
+        lives = self.env.unwrapped.ale.lives()
+        if 0 < lives < self.lives:
+            # for Qbert sometimes we stay in lives == 0 condition for a few frames
+            # so its important to keep lives > 0, so that we only reset once
+            # the environment advertises done.
+            done = True
+        self.lives = lives
+        return obs, reward, done, info
+
+    def reset(self, **kwargs) -> np.ndarray:
+        """
+        Calls the Gym environment reset, only when lives are exhausted.
+        This way all states are still reachable even though lives are episodic,
+        and the learner need not know about any of this behind-the-scenes.
+
+        :param kwargs: Extra keywords passed to env.reset() call
+        :return: the first observation of the environment
+        """
+        if self.was_real_done:
+            obs = self.env.reset(**kwargs)
+        else:
+            # no-op step to advance from terminal/lost life state
+            obs, _, done, _ = self.env.step(0)
+
+            # The no-op step can lead to a game over, so we need to check it again
+            # to see if we should reset the environment and avoid the
+            # monitor.py `RuntimeError: Tried to step environment that needs reset`
+            if done:
+                obs = self.env.reset(**kwargs)
+        self.lives = self.env.unwrapped.ale.lives()
+        return obs
+
+
+class ClipRewardEnv(gym.RewardWrapper):
+    """
+    Clip the reward to {+1, 0, -1} by its sign.
+
+    :param env: Environment to wrap
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+
+    def reward(self, reward: float) -> float:
+        """
+        Bin reward to {+1, 0, -1} by its sign.
+
+        :param reward:
+        :return:
+        """
+        return np.sign(reward)
+
+
+class FireResetEnv(gym.Wrapper):
+    """
+    Take action on reset for environments that are fixed until firing.
+
+    :param env: Environment to wrap
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+        assert env.unwrapped.get_action_meanings()[1] == "FIRE"
+        assert len(env.unwrapped.get_action_meanings()) >= 3
+
+    def reset(self, **kwargs) -> np.ndarray:
+        self.env.reset(**kwargs)
+        obs, _, done, _ = self.env.step(1)
+        if done:
+            self.env.reset(**kwargs)
+        obs, _, done, _ = self.env.step(2)
+        if done:
+            self.env.reset(**kwargs)
+        return obs
+
+
+class WarpFrame(gym.ObservationWrapper):
+    """
+    Convert to grayscale and warp frames to 84x84 (default)
+    as done in the Nature paper and later work.
+
+    :param env: Environment to wrap
+    :param width: New frame width
+    :param height: New frame height
+    """
+
+    def __init__(self, env: gym.Env, width: int = 84, height: int = 84) -> None:
+        super().__init__(env)
+        self.width = width
+        self.height = height
+        self.observation_space = Box(
+            low=0,
+            high=255,
+            shape=(self.height, self.width, 1),
+            dtype=env.observation_space.dtype,
+        )
+
+    def observation(self, frame: np.ndarray) -> np.ndarray:
+        """
+        returns the current observation from a frame
+
+        :param frame: environment frame
+        :return: the observation
+        """
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        frame = cv2.resize(
+            frame, (self.width, self.height), interpolation=cv2.INTER_AREA
+        )
+        return frame[:, :, None]
 
 
 class AtariWrapper(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
@@ -106,6 +238,25 @@ class BufferWrapper(ObservationWrapper):
     def observation(self, observation: np.ndarray) -> np.ndarray:
         self.buffer.append(observation)
         return np.concatenate(self.buffer)
+
+
+class ImageToPyTorch(ObservationWrapper):
+    """
+    Change image shape to CWH
+    """
+
+    def __init__(self, env):
+        super(ImageToPyTorch, self).__init__(env)
+        old_shape = self.observation_space.shape
+        self.observation_space = Box(
+            low=0.0,
+            high=1.0,
+            shape=(old_shape[-1], old_shape[0], old_shape[1]),
+            dtype=np.float32,
+        )
+
+    def observation(self, observation):
+        return np.swapaxes(observation, 2, 0)
 
 
 def wrap_dqn(
