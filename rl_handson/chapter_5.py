@@ -30,7 +30,7 @@ from collections import defaultdict, Counter
 
 
 class Agent:
-    def __init__(self, env: Env):
+    def __init__(self, env: Env, uses_q_iteration=True):
         self.env = env
         # environment state
         self.state, _ = self.env.reset()
@@ -40,6 +40,7 @@ class Agent:
         self.transits = defaultdict(Counter)
         # table of value estimates
         self.values = defaultdict(float)
+        self.uses_q_iteration = uses_q_iteration
 
     def play_n_random_steps(self, count):
         for _ in range(count):
@@ -82,13 +83,16 @@ class Agent:
     def select_action(self, state):
         best_action, best_value = None, None
         for action in range(self.env.action_space.n):
-            action_value = self.calc_action_value(state, action)
+            if self.uses_q_iteration:
+                action_value = self.values[(state, action)]
+            else:
+                action_value = self.calc_action_value(state, action)
             if best_value is None or best_value < action_value:
                 best_value = action_value
                 best_action = action
         return best_action
 
-    def value_iteration(self):
+    def v_iteration(self):
         for state in range(self.env.observation_space.n):
             state_values = [
                 self.calc_action_value(state, action)
@@ -96,17 +100,34 @@ class Agent:
             ]
             self.values[state] = max(state_values)
 
+    def q_iteration(self):
+        """
+        Instead of calculating the value of each state, calculate the value of each state-action pair,
+        and update the Q-values.
+        """
+        for state in range(self.env.observation_space.n):
+            for action in range(self.env.action_space.n):
+                action_value = 0.0
+                target_counts = self.transits[(state, action)]
+                total = sum(target_counts.values())
+                for tgt_state, count in target_counts.items():
+                    reward = self.rewards[(state, action, tgt_state)]
+                    best_action = self.select_action(tgt_state)
+                    action_value += (count / total) * (reward + GAMMA * self.values[(tgt_state, best_action)])
+                self.values[(state, action)] = action_value
+
+
 
 ENV_NAME = "FrozenLake-v1"
 GAMMA = 0.9
 TEST_EPISODES = 20
 
 
-def main():
+def main(q_iteration=True):
 
     env = gymnasium.make(ENV_NAME, render_mode="rgb_array")
     env = RecordVideo(env, video_folder=f"videos/chapter_5")
-    agent = Agent(env)
+    agent = Agent(env, q_iteration)
     writer = SummaryWriter(comment="-v-iteration")
 
     iter_no = 0
@@ -116,7 +137,10 @@ def main():
     while True:
         iter_no += 1
         agent.play_n_random_steps(100)
-        agent.value_iteration()
+        if q_iteration:
+            agent.q_iteration()
+        else:
+            agent.v_iteration()
 
         reward = 0.0
         for _ in range(TEST_EPISODES):
