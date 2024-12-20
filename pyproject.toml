@@ -29,6 +29,8 @@ dependencies = [
     "tensorboard>=2.18.0",
     "gym",
     "stable-baselines3>=1.8.0",
+    "ale-py>=0.10.1",
+    "ptan>=0.4",
 ]
 
 [tool.setuptools]

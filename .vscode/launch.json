@@ -1,9 +1,13 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+        {
+            "name": "Chapter 6",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rl_handson/chapter_6.py",
+            "console": "integratedTerminal",
+        },
         {
             "name": "PPO: run",
             "type": "debugpy",
@@ -17,20 +21,16 @@
             "request": "launch",
             "program": "rl_handson/chapter_4.py",
             "console": "integratedTerminal",
-            "args": ["--environment", "frozenlake"]
+            "args": [
+                "--environment",
+                "frozenlake"
+            ]
         },
         {
             "name": "Chapter 5",
             "type": "debugpy",
             "request": "launch",
             "program": "rl_handson/chapter_5.py",
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Chapter 6",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_6.py",
             "console": "integratedTerminal",
         }
     ]

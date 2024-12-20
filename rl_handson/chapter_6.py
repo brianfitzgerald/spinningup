@@ -41,17 +41,22 @@ Algorithm is:
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
+import ale_py
 import fire
 import gymnasium
 import numpy as np
 import torch
 import torch.nn as nn
-from gymnasium import Env
+from gymnasium import Env, ObservationWrapper
+from gymnasium.spaces import Box
 from gymnasium.wrappers import RecordVideo
+from lib import wrap_dqn
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
+
+gymnasium.register_envs(ale_py)
 
 BatchTensors = Tuple[
     torch.ByteTensor,  # current state
@@ -60,6 +65,25 @@ BatchTensors = Tuple[
     torch.BoolTensor,  # done || trunc
     torch.ByteTensor,  # next state
 ]
+
+
+class ImageToPyTorch(ObservationWrapper):
+    """
+    Wrapper that converts the input image to PyTorch format (C, H, W)
+    """
+
+    def __init__(self, env):
+        super(ImageToPyTorch, self).__init__(env)
+        obs = self.observation_space
+        assert isinstance(obs, Box)
+        assert len(obs.shape) == 3
+        new_shape = (obs.shape[-1], obs.shape[0], obs.shape[1])
+        self.observation_space = Box(
+            low=obs.low.min(), high=obs.high.max(), shape=new_shape, dtype=obs.dtype
+        )
+
+    def observation(self, observation):
+        return np.moveaxis(observation, 2, 0)
 
 
 class DQN(nn.Module):
@@ -75,6 +99,7 @@ class DQN(nn.Module):
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
+            nn.Flatten(),
         )
         # get the size of the output of the conv layer
         size = self.conv(torch.zeros(1, *input_shape)).size()[-1]
@@ -198,7 +223,7 @@ def batch_to_tensors(batch: List[Experience], device: torch.device) -> BatchTens
     )
 
 
-DEFAULT_ENV_NAME = "ALE/Pong-v5"
+DEFAULT_ENV_NAME = "PongNoFrameskip-v4"
 MEAN_REWARD_BOUND = 19.5
 
 GAMMA = 0.99
@@ -243,7 +268,9 @@ def main(device_str: str = "mps", env: str = DEFAULT_ENV_NAME):
     device = torch.device(device_str)
 
     env = gymnasium.make(DEFAULT_ENV_NAME, render_mode="rgb_array")
-    env = RecordVideo(env, video_folder=f"videos/chapter_5")
+    env: Env = RecordVideo(env, video_folder=f"videos/chapter_5")
+    # scale frame size, clip rewards, and convert to grayscale
+    env = wrap_dqn(env)
 
     net = DQN(env.observation_space.shape, env.action_space.n).to(device)
     tgt_net = DQN(env.observation_space.shape, env.action_space.n).to(device)

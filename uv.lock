@@ -1390,6 +1390,12 @@ wheels = [
 ]
 
 [[package]]
+name = "ptan"
+version = "0.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/bc/79b901be607ae861ca24d1ba504ced953c21be05edbd3518a3ff11610932/ptan-0.4.tar.gz", hash = "sha256:e4ac1296811830c4066057e327c3ade07713549130c6501dad54e0669e4b6e99", size = 18000 }
+
+[[package]]
 name = "ptyprocess"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1683,6 +1689,7 @@ name = "spinup"
 version = "0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "ale-py" },
     { name = "cloudpickle" },
     { name = "fire" },
     { name = "gym" },
@@ -1695,6 +1702,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "psutil" },
+    { name = "ptan" },
     { name = "pytest" },
     { name = "scipy" },
     { name = "seaborn" },
@@ -1707,6 +1715,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ale-py", specifier = ">=0.10.1" },
     { name = "cloudpickle" },
     { name = "fire" },
     { name = "gym", git = "https://github.com/openai/gym.git?rev=9180d12e1b66e7e2a1a622614f787a6ec147ac40" },
@@ -1719,6 +1728,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "psutil" },
+    { name = "ptan", specifier = ">=0.4" },
     { name = "pytest" },
     { name = "scipy" },
     { name = "seaborn", specifier = "==0.8.1" },
