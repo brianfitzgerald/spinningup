@@ -96,13 +96,12 @@ def filter_batch(
     Find a reward boundary that separates the elite episodes from the non-elite episodes,
     and return the elite episodes and the mean reward.
     An elite episode is one that has a reward greater than the reward boundary,
-    so it will should be considered 'successful'.
+    so it will be considered 'successful'.
 
     Optionally discount the reward, to reduce it over each step, which penalizes longer episodes.
     """
-    rewards = list(map(lambda s: s.reward * gamma * len(s.steps), batch))
+    rewards = list(map(lambda s: s.reward * gamma ** len(s.steps), batch))
     reward_bound = np.percentile(rewards, percentile)
-    reward_mean = float(np.mean(rewards))
 
     train_obs: List[np.ndarray] = []
     train_act: List[int] = []
@@ -145,24 +144,26 @@ def main(environment: EnvironmentChoice = "CartPole"):
     n_actions = env.action_space.n
 
     if environment == "cartpole":
-        hidden_size = 128
+        hidden_size = 16
         batch_size = 16
         percentile = 70
+        lr = 0.01
     elif environment == "frozenlake":
         hidden_size = 128
         batch_size = 16
-        percentile = 70
+        percentile = 30
+        lr = 0.001
 
     net = Net(obs_size, hidden_size, n_actions)
     objective = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(params=net.parameters(), lr=0.01)
+    optimizer = optim.Adam(params=net.parameters(), lr=lr)
     writer = SummaryWriter(comment=f"-{environment}")
 
     full_batch = []
     for iter_no, batch in enumerate(iterate_batches(env, net, batch_size)):
         reward_mean = float(np.mean(list(map(lambda s: s.reward, batch))))
         gamma = 1 if environment == "cartpole" else 0.9
-        full_batch, obs, acts, reward_bound = filter_batch(batch, percentile)
+        full_batch, obs, acts, reward_bound = filter_batch(batch, percentile, gamma)
         if not full_batch:
             continue
         obs_v = torch.FloatTensor(obs)
