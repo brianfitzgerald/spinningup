@@ -33,7 +33,7 @@ class Agent:
     def __init__(self, env: Env):
         self.env = env
         # environment state
-        self.state = self.env.reset()
+        self.state, _ = self.env.reset()
         # table of reward estimates
         self.rewards = defaultdict(float)
         # table of state transition counts
@@ -44,15 +44,21 @@ class Agent:
     def play_n_random_steps(self, count):
         for _ in range(count):
             action = self.env.action_space.sample()
-            new_state, reward, is_done, _ = self.env.step(action)
+            new_state, reward, finished, terminated, _ = self.env.step(action)
+            is_done = finished or terminated
             self.rewards[(self.state, action, new_state)] = reward
             self.transits[(self.state, action)][new_state] += 1
-            self.state = self.env.reset() if is_done else new_state
+            if is_done:
+                self.state, _ = self.env.reset()
+            else:
+                self.state = new_state
 
     def calc_action_value(self, state, action):
+        # the transitions possible for the given state and action
         target_counts = self.transits[(state, action)]
         total = sum(target_counts.values())
         action_value = 0.0
+        # get the sum of the rewards for each possible state transition
         for tgt_state, count in target_counts.items():
             reward = self.rewards[(state, action, tgt_state)]
             action_value += (count / total) * (reward + GAMMA * self.values[tgt_state])
@@ -63,7 +69,8 @@ class Agent:
         state, _ = self.env.reset()
         while True:
             action = self.select_action(state)
-            new_state, reward, is_done, _ = self.env.step(action)
+            new_state, reward, finished, terminated, _ = self.env.step(action)
+            is_done = finished or terminated
             self.rewards[(state, action, new_state)] = reward
             self.transits[(state, action)][new_state] += 1
             total_reward += reward
@@ -71,6 +78,15 @@ class Agent:
                 break
             state = new_state
         return total_reward
+
+    def select_action(self, state):
+        best_action, best_value = None, None
+        for action in range(self.env.action_space.n):
+            action_value = self.calc_action_value(state, action)
+            if best_value is None or best_value < action_value:
+                best_value = action_value
+                best_action = action
+        return best_action
 
     def value_iteration(self):
         for state in range(self.env.observation_space.n):
@@ -81,18 +97,16 @@ class Agent:
             self.values[state] = max(state_values)
 
 
-ENV_NAME = "FrozenLake-v0"
+ENV_NAME = "FrozenLake-v1"
 GAMMA = 0.9
 TEST_EPISODES = 20
 
 
 def main():
 
-    env = gymnasium.make(ENV_NAME)
+    env = gymnasium.make(ENV_NAME, render_mode="rgb_array")
     env = RecordVideo(env, video_folder=f"videos/chapter_5")
-    obs_size = env.observation_space.shape[0]
-    n_actions = env.action_space.n
-    agent = Agent()
+    agent = Agent(env)
     writer = SummaryWriter(comment="-v-iteration")
 
     iter_no = 0
@@ -106,7 +120,7 @@ def main():
 
         reward = 0.0
         for _ in range(TEST_EPISODES):
-            reward += agent.play_episode(test_env)
+            reward += agent.play_episode()
         reward /= TEST_EPISODES
         writer.add_scalar("reward", reward, iter_no)
         if reward > best_reward:
