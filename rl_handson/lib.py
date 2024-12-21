@@ -66,8 +66,8 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.was_real_done = True
 
     def step(self, action: int) -> GymStepReturn:
-        obs, reward, finished, terminated, info = self.env.step(action)
-        done = finished or terminated
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        done = terminated or truncated
         self.was_real_done = done
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
@@ -78,7 +78,7 @@ class EpisodicLifeEnv(gym.Wrapper):
             # the environment advertises done.
             done = True
         self.lives = lives
-        return obs, reward, finished, terminated, info
+        return obs, reward, terminated, truncated, info
 
     def reset(self, **kwargs) -> np.ndarray:
         """
@@ -93,12 +93,12 @@ class EpisodicLifeEnv(gym.Wrapper):
             obs = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
-            obs, _, finished, terminated, _ = self.env.step(0)
+            obs, _, terminated, truncated, _ = self.env.step(0)
 
             # The no-op step can lead to a game over, so we need to check it again
             # to see if we should reset the environment and avoid the
             # monitor.py `RuntimeError: Tried to step environment that needs reset`
-            if finished or terminated:
+            if terminated or truncated:
                 obs, extra = self.env.reset(**kwargs)
         self.lives = self.env.unwrapped.ale.lives()
         return obs

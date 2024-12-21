@@ -40,7 +40,7 @@ Algorithm is:
 
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, astuple
 from typing import Any, List, Optional, Tuple
 
 import ale_py
@@ -127,8 +127,9 @@ class ExperienceBuffer:
     def sample(self, batch_size):
         # Sample a random batch of experiences, and return as a tuple of arrays
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        chosen_buffers = [astuple(self.buffer[idx]) for idx in indices]
         states, actions, rewards, dones, next_states = zip(
-            *[self.buffer[idx] for idx in indices]
+            *chosen_buffers
         )
         return (
             np.array(states),
