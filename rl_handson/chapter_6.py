@@ -114,32 +114,6 @@ class DQN(nn.Module):
         return self.fc(self.conv(xx))
 
 
-class ExperienceBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
-
-    def __len__(self):
-        return len(self.buffer)
-
-    def append(self, experience):
-        self.buffer.append(experience)
-
-    def sample(self, batch_size):
-        # Sample a random batch of experiences, and return as a tuple of arrays
-        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
-        chosen_buffers = [astuple(self.buffer[idx]) for idx in indices]
-        states, actions, rewards, dones, next_states = zip(
-            *chosen_buffers
-        )
-        return (
-            np.array(states),
-            np.array(actions),
-            np.array(rewards, dtype=np.float32),
-            np.array(dones, dtype=np.uint8),
-            np.array(next_states),
-        )
-
-
 State = np.ndarray
 Action = int
 
@@ -151,6 +125,21 @@ class Experience:
     reward: float
     done_trunc: bool
     new_state: State
+
+
+class ExperienceBuffer:
+    def __init__(self, capacity: int):
+        self.buffer = deque(maxlen=capacity)
+
+    def __len__(self):
+        return len(self.buffer)
+
+    def append(self, experience: Experience):
+        self.buffer.append(experience)
+
+    def sample(self, batch_size: int) -> List[Experience]:
+        indices = np.random.choice(len(self), batch_size, replace=False)
+        return [self.buffer[idx] for idx in indices]
 
 
 class Agent:
