@@ -52,7 +52,7 @@ import torch.nn as nn
 from gymnasium import Env, ObservationWrapper
 from gymnasium.spaces import Box
 from gymnasium.wrappers import RecordVideo
-from lib import wrap_dqn
+from lib import ensure_directory, wrap_dqn
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
 
@@ -263,11 +263,11 @@ def calc_loss(
     return nn.MSELoss()(state_action_values, expected_state_action_values)
 
 
-def main(device_str: str = "mps", env: str = DEFAULT_ENV_NAME):
+def main(device_str: str = "mps", env_name: str = DEFAULT_ENV_NAME):
 
     device = torch.device(device_str)
 
-    env = gymnasium.make(DEFAULT_ENV_NAME, render_mode="rgb_array")
+    env = gymnasium.make(env_name, render_mode="rgb_array")
     env: Env = RecordVideo(env, video_folder=f"videos/chapter_5")
     # scale frame size, clip rewards, and convert to grayscale
     env = wrap_dqn(env, clip_reward=False, noop_max=0)
@@ -310,7 +310,9 @@ def main(device_str: str = "mps", env: str = DEFAULT_ENV_NAME):
             writer.add_scalar("reward_100", m_reward, frame_idx)
             writer.add_scalar("reward", reward, frame_idx)
             if best_m_reward is None or best_m_reward < m_reward:
-                torch.save(net.state_dict(), env + "-best_%.0f.dat" % m_reward)
+                save_location = f"checkpoints/{env_name}-best_{m_reward:.0f}.dat"
+                ensure_directory("checkpoints", False)
+                torch.save(net.state_dict(), save_location)
                 if best_m_reward is not None:
                     print(f"Best reward updated {best_m_reward:.3f} -> {m_reward:.3f}")
                 best_m_reward = m_reward

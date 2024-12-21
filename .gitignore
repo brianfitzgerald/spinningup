@@ -11,3 +11,4 @@ venv/
 videos/
 .venv
 runs/
+checkpoints/

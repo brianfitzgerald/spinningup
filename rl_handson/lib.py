@@ -1,16 +1,16 @@
+import shutil
 from collections import deque
+from pathlib import Path
 from typing import Any, Optional
 
+import cv2
 import gymnasium as gym
 import numpy as np
 from gymnasium import ObservationWrapper
+from gymnasium.core import WrapperObsType
 from gymnasium.spaces import Box
-from stable_baselines3.common.atari_wrappers import (
-    NoopResetEnv,
-    StickyActionEnv,
-)
+from stable_baselines3.common.atari_wrappers import NoopResetEnv, StickyActionEnv
 from stable_baselines3.common.type_aliases import GymStepReturn
-import cv2
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3
@@ -66,7 +66,8 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.was_real_done = True
 
     def step(self, action: int) -> GymStepReturn:
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, finished, terminated, info = self.env.step(action)
+        done = finished or terminated
         self.was_real_done = done
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
@@ -77,7 +78,7 @@ class EpisodicLifeEnv(gym.Wrapper):
             # the environment advertises done.
             done = True
         self.lives = lives
-        return obs, reward, done, info
+        return obs, reward, finished, terminated, info
 
     def reset(self, **kwargs) -> np.ndarray:
         """
@@ -92,13 +93,13 @@ class EpisodicLifeEnv(gym.Wrapper):
             obs = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
-            obs, _, done, _ = self.env.step(0)
+            obs, _, finished, terminated, _ = self.env.step(0)
 
             # The no-op step can lead to a game over, so we need to check it again
             # to see if we should reset the environment and avoid the
             # monitor.py `RuntimeError: Tried to step environment that needs reset`
-            if done:
-                obs = self.env.reset(**kwargs)
+            if finished or terminated:
+                obs, extra = self.env.reset(**kwargs)
         self.lives = self.env.unwrapped.ale.lives()
         return obs
 
@@ -137,11 +138,11 @@ class FireResetEnv(gym.Wrapper):
 
     def reset(self, **kwargs) -> np.ndarray:
         self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(1)
-        if done:
+        obs, _, finished, terminated, _ = self.env.step(1)
+        if finished or terminated:
             self.env.reset(**kwargs)
-        obs, _, done, _ = self.env.step(2)
-        if done:
+        obs, _, finished, terminated, _ = self.env.step(2)
+        if finished or terminated:
             self.env.reset(**kwargs)
         return obs
 
@@ -155,6 +156,12 @@ class WarpFrame(gym.ObservationWrapper):
     :param width: New frame width
     :param height: New frame height
     """
+
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[WrapperObsType, dict[str, Any]]:
+        obs = self.env.reset(seed=seed, options=options)
+        return self.observation(obs), None
 
     def __init__(self, env: gym.Env, width: int = 84, height: int = 84) -> None:
         super().__init__(env)
@@ -286,3 +293,13 @@ def wrap_dqn(
     if stack_frames > 1:
         env = BufferWrapper(env, stack_frames)
     return env
+
+
+def ensure_directory(directory: str, clear: bool = True):
+    """
+    Create a directory and parents if it doesn't exist, and clear it if it does.
+    """
+    Path(directory).mkdir(exist_ok=True, parents=True)
+    if clear:
+        shutil.rmtree(directory)
+    Path(directory).mkdir(exist_ok=True, parents=True)
