@@ -9,28 +9,17 @@ authors = [{ name = "Joshua Achiam" }]
 requires-python = ">=3.11"
 
 dependencies = [
-    "cloudpickle",
-    "fire",
-    "gymnasium[all]",
-    "ipython",
-    "joblib",
-    "matplotlib",
-    "mpi4py",
-    "numpy",
-    "pandas",
-    "pytest",
-    "psutil",
-    "scipy",
     "seaborn==0.8.1",
-    "torch",
-    "tqdm",
     "tensorboardx>=2.6.2.2",
     "loguru>=0.7.3",
     "tensorboard>=2.18.0",
-    "gym",
-    "stable-baselines3>=1.8.0",
     "ale-py>=0.10.1",
     "ptan>=0.4",
+    "opencv-python>=4.10.0.84",
+    "fire>=0.7.0",
+    "ipython>=8.30.0",
+    "gymnasium[other]>=1.0.0",
+    "torch>=2.5.1",
 ]
 
 [tool.setuptools]
@@ -38,3 +27,12 @@ py-modules = ["spinup"]
 
 [tool.uv.sources]
 gym = { git = "https://github.com/openai/gym.git", rev = "9180d12e1b66e7e2a1a622614f787a6ec147ac40" }
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+

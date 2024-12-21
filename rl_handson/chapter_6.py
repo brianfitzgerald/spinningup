@@ -253,9 +253,12 @@ def calc_loss(
     return nn.MSELoss()(state_action_values, expected_state_action_values)
 
 
-def main(device_str: str = "mps", env_name: str = DEFAULT_ENV_NAME):
+def get_device():
+    return "cuda" if torch.cuda.is_available() else "mps"
 
-    device = torch.device(device_str)
+def main(env_name: str = DEFAULT_ENV_NAME):
+
+    device = torch.device(get_device())
 
     env = gymnasium.make(env_name, render_mode="rgb_array")
     env: Env = RecordVideo(env, video_folder=f"videos/chapter_5")

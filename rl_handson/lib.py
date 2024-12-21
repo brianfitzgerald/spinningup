@@ -9,8 +9,6 @@ import numpy as np
 from gymnasium import ObservationWrapper
 from gymnasium.core import WrapperObsType
 from gymnasium.spaces import Box
-from stable_baselines3.common.atari_wrappers import NoopResetEnv, StickyActionEnv
-from stable_baselines3.common.type_aliases import GymStepReturn
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3
@@ -31,7 +29,7 @@ class JustSkipEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
         super().__init__(env)
         self._skip = skip
 
-    def step(self, action: int) -> GymStepReturn:
+    def step(self, action: int):
         """
         Step the environment with the given action
         Repeat action, sum reward, and max over last observations.
@@ -65,7 +63,7 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.lives = 0
         self.was_real_done = True
 
-    def step(self, action: int) -> GymStepReturn:
+    def step(self, action: int):
         obs, reward, terminated, truncated, info = self.env.step(action)
         done = terminated or truncated
         self.was_real_done = done
