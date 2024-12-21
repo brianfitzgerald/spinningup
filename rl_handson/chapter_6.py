@@ -39,6 +39,9 @@ Algorithm is:
 1m game frames are needed to train fully
 400k to mean reward of 17
 
+should be able to win in 80k frames
+reward is no. of points scored in the game
+
 """
 
 import time
@@ -168,6 +171,7 @@ class Agent:
     ) -> Optional[float]:
         done_reward = None
 
+        # Select an action using epsilon-greedy - with probability epsilon, select a random action
         if np.random.random() < epsilon:
             action = self.env.action_space.sample()
         else:
@@ -276,6 +280,8 @@ def main(env_name: str = DEFAULT_ENV_NAME):
     # scale frame size, clip rewards, and convert to grayscale
     env = wrap_dqn(env, clip_reward=False)
 
+    # Idea with target network is to keep a copy of the main network
+    # and update it less frequently. This increases stability
     net = DQN(env.observation_space.shape, env.action_space.n).to(device)
     tgt_net = DQN(env.observation_space.shape, env.action_space.n).to(device)
 
@@ -325,6 +331,7 @@ def main(env_name: str = DEFAULT_ENV_NAME):
                 break
         if len(buffer) < REPLAY_START_SIZE:
             continue
+        # sync the target network with the main network
         if frame_idx % SYNC_TARGET_FRAMES == 0:
             tgt_net.load_state_dict(net.state_dict())
 
