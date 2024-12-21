@@ -30,13 +30,6 @@ class JustSkipEnv(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
         self._skip = skip
 
     def step(self, action: int):
-        """
-        Step the environment with the given action
-        Repeat action, sum reward, and max over last observations.
-
-        :param action: the action
-        :return: observation, reward, terminated, truncated, information
-        """
         total_reward = 0.0
         info = {}
         obs = None
@@ -198,9 +191,11 @@ class AtariWrapper(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
         action_repeat_probability: float = 0.0,
     ) -> None:
         if action_repeat_probability > 0.0:
-            env = StickyActionEnv(env, action_repeat_probability)
+            raise NotImplementedError("StickyActionEnv is not implemented")
+            # env = StickyActionEnv(env, action_repeat_probability)
         if noop_max > 0:
-            env = NoopResetEnv(env, noop_max=noop_max)
+            raise NotImplementedError("NoopResetEnv is not implemented")
+            # env = NoopResetEnv(env, noop_max=noop_max)
         # frame_skip=1 is the same as no frame-skip (action repeat)
         if frame_skip > 1:
             env = JustSkipEnv(env, skip=frame_skip)

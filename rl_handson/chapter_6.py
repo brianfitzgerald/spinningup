@@ -36,6 +36,9 @@ Algorithm is:
 - Every C steps, copy the weights of the main network to the target network
 - Repeat until convergence
 
+1m game frames are needed to train fully
+400k to mean reward of 17
+
 """
 
 import time
@@ -55,6 +58,7 @@ from gymnasium.wrappers import RecordVideo
 from lib import ensure_directory, wrap_dqn
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
+import torch.nn.functional as F
 
 gymnasium.register_envs(ale_py)
 
@@ -135,9 +139,14 @@ class ExperienceBuffer:
         return len(self.buffer)
 
     def append(self, experience: Experience):
+        # Only keep the last N experiences
+        # This ensures the buffer is always the same size,
+        # and the agent always sees the most recent experiences
+        # with the best performance
         self.buffer.append(experience)
 
     def sample(self, batch_size: int) -> List[Experience]:
+        # Randomly sample from the buffer for each batch
         indices = np.random.choice(len(self), batch_size, replace=False)
         return [self.buffer[idx] for idx in indices]
 
@@ -225,9 +234,9 @@ REPLAY_START_SIZE = 10000
 
 # Decay epsilon from start to final in the first 10^5 frames
 # This means we start with a high exploration rate, and then decrease it
-EPSILON_DECAY_LAST_FRAME = 10**5
+EPSILON_DECAY_LAST_FRAME = 150000
 EPSILON_START = 1.0
-EPSILON_FINAL = 0.02
+EPSILON_FINAL = 0.01
 
 
 def calc_loss(
@@ -239,22 +248,24 @@ def calc_loss(
         batch, device
     )
 
-    # get the action value pairs for the current state
+    # get the action value pairs for the current state batch
     state_action_values = net(states_t).gather(1, actions_t.unsqueeze(-1)).squeeze(-1)
     with torch.no_grad():
         next_state_values = tgt_net(new_states_t).max(1)[0]
         # set the next state values to 0 if the episode is done
         next_state_values[dones_t] = 0.0
+        # Detach to prevent gradients from flowing back to the target network
         next_state_values = next_state_values.detach()
 
     # scale the expected rewards by gamma and add to the next state values
     expected_state_action_values = next_state_values * GAMMA + rewards_t
     # calculate the loss between the predicted and expected state action values
-    return nn.MSELoss()(state_action_values, expected_state_action_values)
+    return F.mse_loss(state_action_values, expected_state_action_values)
 
 
 def get_device():
     return "cuda" if torch.cuda.is_available() else "mps"
+
 
 def main(env_name: str = DEFAULT_ENV_NAME):
 
@@ -263,7 +274,7 @@ def main(env_name: str = DEFAULT_ENV_NAME):
     env = gymnasium.make(env_name, render_mode="rgb_array")
     env: Env = RecordVideo(env, video_folder=f"videos/chapter_5")
     # scale frame size, clip rewards, and convert to grayscale
-    env = wrap_dqn(env, clip_reward=False, noop_max=0)
+    env = wrap_dqn(env, clip_reward=False)
 
     net = DQN(env.observation_space.shape, env.action_space.n).to(device)
     tgt_net = DQN(env.observation_space.shape, env.action_space.n).to(device)
@@ -279,7 +290,7 @@ def main(env_name: str = DEFAULT_ENV_NAME):
     ts = time.time()
     best_m_reward = None
 
-    writer = SummaryWriter(comment="-v-iteration")
+    writer = SummaryWriter(comment="pong")
 
     while True:
         frame_idx += 1
