@@ -1,14 +1,17 @@
 import shutil
 from collections import deque
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import cv2
 import gymnasium as gym
 import numpy as np
+import torch
+import torch.nn as nn
 from gymnasium import ObservationWrapper
 from gymnasium.core import WrapperObsType
 from gymnasium.spaces import Box
+from ptan import ExperienceFirstLast
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3
@@ -296,3 +299,50 @@ def ensure_directory(directory: str, clear: bool = True):
     if clear:
         shutil.rmtree(directory)
     Path(directory).mkdir(exist_ok=True, parents=True)
+
+
+def unpack_batch(batch: List[ExperienceFirstLast]):
+    states, actions, rewards, dones, last_states = [], [], [], [], []
+    for exp in batch:
+        states.append(exp.state)
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        dones.append(exp.last_state is None)
+        if exp.last_state is None:
+            lstate = exp.state  # the result will be masked anyway
+        else:
+            lstate = exp.last_state
+        last_states.append(lstate)
+    return (
+        np.asarray(states),
+        np.array(actions),
+        np.array(rewards, dtype=np.float32),
+        np.array(dones, dtype=bool),
+        np.asarray(last_states),
+    )
+
+
+def calc_loss_dqn(
+    batch: List[ExperienceFirstLast],
+    net: nn.Module,
+    tgt_net: nn.Module,
+    gamma: float,
+    device: torch.device,
+) -> torch.Tensor:
+    states, actions, rewards, dones, next_states = unpack_batch(batch)
+
+    states_v = torch.as_tensor(states).to(device)
+    next_states_v = torch.as_tensor(next_states).to(device)
+    actions_v = torch.LongTensor(actions).to(device)
+    rewards_v = torch.FloatTensor(rewards).to(device)
+    done_mask = torch.BoolTensor(dones).to(device)
+
+    actions_v = actions_v.unsqueeze(-1)
+    state_action_vals = net(states_v).gather(1, actions_v)
+    state_action_vals = state_action_vals.squeeze(-1)
+    with torch.no_grad():
+        next_state_vals = tgt_net(next_states_v).max(1)[0]
+        next_state_vals[done_mask] = 0.0
+
+    bellman_vals = next_state_vals.detach() * gamma + rewards_v
+    return nn.MSELoss()(state_action_vals, bellman_vals)
