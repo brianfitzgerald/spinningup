@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from ignite.engine import Engine, EventEnum, Events, State
 from ignite.handlers.timing import Timer
 from torch import nn
+from loguru import logger
 
 CPU_DEVICE = torch.device("cpu")
 States = tt.List[np.ndarray] | np.ndarray
@@ -138,8 +139,8 @@ class NNAgent(BaseAgent):
             agent_states = [None] * len(states)
         if self.preprocessor is not None:
             states = self.preprocessor(states)
-            if torch.is_tensor(states):
-                states = states.to(self.device)
+            # if torch.is_tensor(states):
+            #     states = states.to(self.device)
         q_v = self.model(states)
         q_v, new_states = self._net_filter(q_v, agent_states)
         q = q_v.data.cpu().numpy()
@@ -280,6 +281,7 @@ class ExperienceSource:
                     yield tuple(history)
                 states[idx] = next_state
                 if is_done or is_tr:
+                    logger.info(f"Done: {is_done}, truncated: {is_tr}")
                     # generate tail of history
                     if 0 < len(history) < self.steps_count:
                         yield tuple(history)

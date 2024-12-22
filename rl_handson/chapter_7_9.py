@@ -25,8 +25,8 @@ from ptan import (
     PeriodicEvents,
     TargetNet,
 )
-from tensorboardX import SummaryWriter
 from torch.optim import Adam
+from loguru import logger
 
 gymnasium.register_envs(ale_py)
 from ignite.engine import Engine
@@ -52,9 +52,9 @@ class Hyperparams:
     target_net_sync: int
     epsilon_frames: int
 
-    learning_rate: float = 0.0001
+    learning_rate: float = 9.9e-5
     batch_size: int = 32
-    gamma: float = 0.99
+    gamma: float = 0.98
     epsilon_start: float = 1.0
     epsilon_final: float = 0.02
 
@@ -64,11 +64,13 @@ def play_func(params: Hyperparams, net: DQN, device: str, exp_queue: mp.Queue):
     env = wrap_dqn(env)
     device = torch.device(device)
 
+    logger.info(f"Starting play loop with device: {device}")
+
     selector = EpsilonGreedyActionSelector(epsilon=params.epsilon_start)
     epsilon_tracker = EpsilonTracker(
         selector, params.epsilon_start, params.epsilon_final, params.epsilon_frames
     )
-    agent = DQNAgent(net, selector, device=device)
+    agent = DQNAgent(net, selector, device)
     exp_source = ExperienceSourceFirstLast(
         env, agent, gamma=params.gamma, env_seed=SEED
     )
@@ -128,7 +130,8 @@ def main():
 
     random.seed(SEED)
     torch.manual_seed(SEED)
-    device_str = get_device()
+    # device_str = get_device()
+    device_str = "cpu"
     device = torch.device(device_str)
 
     params = Hyperparams(
@@ -149,12 +152,13 @@ def main():
     tgt_net = TargetNet(net)
     optimizer = Adam(net.parameters(), lr=params.learning_rate)
 
-    # start subprocess and experience queue
+    # Process for generating batches of experiences
     exp_queue = mp.Queue(maxsize=2)
     proc_args = (params, net, device_str, exp_queue)
     play_proc = mp.Process(target=play_func, args=proc_args)
     play_proc.start()
     fps_handler = EpisodeFPSHandler()
+    # Generates batches of experiences using simulators
     batch_generator = BatchGenerator(
         params.replay_size,
         exp_queue,
@@ -163,12 +167,14 @@ def main():
         params.batch_size,
     )
 
-    def process_batch(engine, batch):
+    def process_batch(engine: Engine, batch):
+        logger.info("Processing batch")
         optimizer.zero_grad()
         loss_v = calc_loss_dqn(
             batch, net, tgt_net.target_model, gamma=params.gamma, device=device
         )
         loss_v.backward()
+        logger.info(f"Loss: {loss_v.item()}")
         optimizer.step()
         if engine.state.iteration % params.target_net_sync == 0:
             tgt_net.sync()
@@ -183,7 +189,7 @@ def main():
 
     @engine.on(EpisodeEvents.EPISODE_COMPLETED)
     def episode_completed(trainer: Engine):
-        print(
+        logger.info(
             "Episode %d: reward=%s, steps=%s, speed=%.3f frames/s, elapsed=%s"
             % (
                 trainer.state.episode,
@@ -197,7 +203,7 @@ def main():
 
     @engine.on(EpisodeEvents.BOUND_REWARD_REACHED)
     def game_solved(trainer: Engine):
-        print(
+        logger.info(
             "Game solved in %s, after %d episodes and %d iterations!"
             % (
                 timedelta(seconds=trainer.state.metrics["time_passed"]),
@@ -228,6 +234,7 @@ def main():
     try:
         engine.run(batch_generator)
     finally:
+        logger.info("Stopping the play process")
         play_proc.kill()
         play_proc.join()
 
