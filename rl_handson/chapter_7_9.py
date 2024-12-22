@@ -126,7 +126,7 @@ DEFAULT_ENV_NAME = "PongNoFrameskip-v4"
 
 
 def main():
-    mp.set_start_method("spawn")
+    mp.set_start_method("spawn", force=True)
 
     random.seed(SEED)
     torch.manual_seed(SEED)
@@ -168,13 +168,11 @@ def main():
     )
 
     def process_batch(engine: Engine, batch):
-        logger.info("Processing batch")
         optimizer.zero_grad()
         loss_v = calc_loss_dqn(
             batch, net, tgt_net.target_model, gamma=params.gamma, device=device
         )
         loss_v.backward()
-        logger.info(f"Loss: {loss_v.item()}")
         optimizer.step()
         if engine.state.iteration % params.target_net_sync == 0:
             tgt_net.sync()

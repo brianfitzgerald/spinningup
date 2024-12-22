@@ -139,8 +139,8 @@ class NNAgent(BaseAgent):
             agent_states = [None] * len(states)
         if self.preprocessor is not None:
             states = self.preprocessor(states)
-            # if torch.is_tensor(states):
-            #     states = states.to(self.device)
+            if torch.is_tensor(states):
+                states = states.to(self.device)
         q_v = self.model(states)
         q_v, new_states = self._net_filter(q_v, agent_states)
         q = q_v.data.cpu().numpy()

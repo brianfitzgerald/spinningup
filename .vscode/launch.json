@@ -7,6 +7,9 @@
             "request": "launch",
             "program": "rl_handson/chapter_7_9.py",
             "console": "integratedTerminal",
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            }
         },
         {
             "name": "Chapter 6",
