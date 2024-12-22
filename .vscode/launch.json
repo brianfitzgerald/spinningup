@@ -2,6 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Chapter 11",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rl_handson/chapter_11.py",
+            "console": "integratedTerminal",
+        },
+        {
             "name": "Chapter 7-9",
             "type": "debugpy",
             "request": "launch",

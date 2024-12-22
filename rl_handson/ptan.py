@@ -544,11 +544,14 @@ class EpisodeFPSHandler:
         self._timer.reset()
 
 
-
 class EndOfEpisodeHandler:
-    def __init__(self, exp_source: ExperienceSource, alpha: float = 0.98,
-                 bound_avg_reward: Optional[float] = None,
-                 subsample_end_of_episode: Optional[int] = None):
+    def __init__(
+        self,
+        exp_source: ExperienceSource,
+        alpha: float = 0.98,
+        bound_avg_reward: Optional[float] = None,
+        subsample_end_of_episode: Optional[int] = None,
+    ):
         """
         Construct end-of-episode event handler
         :param exp_source: experience source to use
@@ -574,24 +577,76 @@ class EndOfEpisodeHandler:
             engine.state.episode = getattr(engine.state, "episode", 0) + 1
             engine.state.episode_reward = reward
             engine.state.episode_steps = steps
-            engine.state.metrics['reward'] = reward
-            engine.state.metrics['steps'] = steps
+            engine.state.metrics["reward"] = reward
+            engine.state.metrics["steps"] = steps
             self._update_smoothed_metrics(engine, reward, steps)
-            if self._subsample_end_of_episode is None or engine.state.episode % self._subsample_end_of_episode == 0:
+            if (
+                self._subsample_end_of_episode is None
+                or engine.state.episode % self._subsample_end_of_episode == 0
+            ):
                 engine.fire_event(EpisodeEvents.EPISODE_COMPLETED)
-            if self._bound_avg_reward is not None and engine.state.metrics['avg_reward'] >= self._bound_avg_reward:
+            if (
+                self._bound_avg_reward is not None
+                and engine.state.metrics["avg_reward"] >= self._bound_avg_reward
+            ):
                 engine.fire_event(EpisodeEvents.BOUND_REWARD_REACHED)
             if self._best_avg_reward is None:
-                self._best_avg_reward = engine.state.metrics['avg_reward']
-            elif self._best_avg_reward < engine.state.metrics['avg_reward']:
+                self._best_avg_reward = engine.state.metrics["avg_reward"]
+            elif self._best_avg_reward < engine.state.metrics["avg_reward"]:
                 engine.fire_event(EpisodeEvents.BEST_REWARD_REACHED)
-                self._best_avg_reward = engine.state.metrics['avg_reward']
+                self._best_avg_reward = engine.state.metrics["avg_reward"]
 
     def _update_smoothed_metrics(self, engine: Engine, reward: float, steps: int):
-        for attr_name, val in zip(('avg_reward', 'avg_steps'), (reward, steps)):
+        for attr_name, val in zip(("avg_reward", "avg_steps"), (reward, steps)):
             if attr_name not in engine.state.metrics:
                 engine.state.metrics[attr_name] = val
             else:
                 engine.state.metrics[attr_name] *= self._alpha
-                engine.state.metrics[attr_name] += (1-self._alpha) * val
+                engine.state.metrics[attr_name] += (1 - self._alpha) * val
 
+
+class ProbabilityActionSelector(ActionSelector):
+    """
+    Converts probabilities of actions into action by sampling them
+    """
+
+    def __call__(self, probs: np.ndarray) -> np.ndarray:
+        actions = []
+        for prob in probs:
+            actions.append(np.random.choice(len(prob), p=prob))
+        return np.array(actions)
+
+
+def float32_preprocessor(states: States):
+    np_states = np.array(states, dtype=np.float32)
+    return torch.as_tensor(np_states)
+
+
+class PolicyAgent(NNAgent):
+    """
+    Policy agent gets action probabilities from the model and samples actions from it
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        action_selector: ActionSelector = ProbabilityActionSelector(),
+        device: torch.device = CPU_DEVICE,
+        apply_softmax: bool = False,
+        preprocessor: Preprocessor = default_states_preprocessor,
+    ):
+        super().__init__(
+            model=model,
+            action_selector=action_selector,
+            device=device,
+            preprocessor=preprocessor,
+        )
+        self.apply_softmax = apply_softmax
+
+    def _net_filter(
+        self, net_out: tt.Any, agent_states: AgentStates
+    ) -> tt.Tuple[torch.Tensor, AgentStates]:
+        assert torch.is_tensor(net_out)
+        if self.apply_softmax:
+            return F.softmax(net_out, dim=1), agent_states
+        return net_out, agent_states

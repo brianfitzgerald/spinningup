@@ -28,3 +28,18 @@ class DQN(nn.Module):
         # scale on GPU
         xx = x / 255.0
         return self.fc(self.conv(xx))
+
+
+
+class SimpleLinear(nn.Module):
+    def __init__(self, input_size: int, n_actions: int):
+        super(SimpleLinear, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(input_size, 128),
+            nn.ReLU(),
+            nn.Linear(128, n_actions)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
