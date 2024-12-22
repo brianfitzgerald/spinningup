@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Chapter 7",
+            "name": "Chapter 7-9",
             "type": "debugpy",
             "request": "launch",
-            "program": "rl_handson/chapter_7.py",
+            "program": "rl_handson/chapter_7_9.py",
             "console": "integratedTerminal",
         },
         {

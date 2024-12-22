@@ -1,6 +1,6 @@
-from datetime import datetime
 import random
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Tuple
 
 import ale_py
@@ -14,6 +14,7 @@ from models import DQN
 from ptan import (
     DQNAgent,
     EpsilonGreedyActionSelector,
+    EpsilonTracker,
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
     TargetNet,
@@ -50,20 +51,10 @@ class Hyperparams:
     epsilon_final: float = 0.02
 
 
-class EpsilonTracker:
-    def __init__(self, selector: EpsilonGreedyActionSelector, params: Hyperparams):
-        self.selector = selector
-        self.params = params
-        self.frame(0)
-
-    def frame(self, frame_idx: int):
-        eps = self.params.epsilon_start - frame_idx / self.params.epsilon_frames
-        self.selector.epsilon = max(self.params.epsilon_final, eps)
-
 
 def play_func(params: Hyperparams, net: DQN, dev_name: str, exp_queue: mp.Queue):
     env = gym.make(params.env_name)
-    env = ptan.common.wrappers.wrap_dqn(env)
+    env = wrap_dqn(env)
     device = torch.device(dev_name)
 
     selector = EpsilonGreedyActionSelector(epsilon=params.epsilon_start)
@@ -154,6 +145,8 @@ def main():
         params.replay_size, exp_queue, params.replay_initial, params.batch_size
     )
 
+    # TODO add the wrapper tweaks
+
     def process_batch(engine, batch):
         optimizer.zero_grad()
         loss_v = calc_loss_dqn(
@@ -171,6 +164,9 @@ def main():
     # TODO replace ignite / engine stuff
 
     logdir = f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
+
+    play_proc.kill()
+    play_proc.join()
 
 
 if __name__ == "__main__":

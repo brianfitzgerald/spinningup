@@ -14,12 +14,12 @@ dependencies = [
     "loguru>=0.7.3",
     "tensorboard>=2.18.0",
     "ale-py>=0.10.1",
-    "ptan>=0.4",
     "opencv-python>=4.10.0.84",
     "fire>=0.7.0",
     "ipython>=8.30.0",
     "gymnasium[other]>=1.0.0",
     "torch>=2.5.1",
+    "pytorch-ignite>=0.5.1",
 ]
 
 [tool.setuptools]

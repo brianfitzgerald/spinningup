@@ -890,12 +890,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ptan"
-version = "0.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/41/bc/79b901be607ae861ca24d1ba504ced953c21be05edbd3518a3ff11610932/ptan-0.4.tar.gz", hash = "sha256:e4ac1296811830c4066057e327c3ade07713549130c6501dad54e0669e4b6e99", size = 18000 }
-
-[[package]]
 name = "ptyprocess"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -950,6 +944,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bc/57/e84d88dfe0aec03b7a2d4327012c1627ab5f03652216c63d49846d7a6c58/python-dotenv-1.0.1.tar.gz", hash = "sha256:e324ee90a023d808f1959c46bcbc04446a10ced277783dc6ee09987c37ec10ca", size = 39115 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/3e/b68c118422ec867fa7ab88444e1274aa40681c606d59ac27de5a5588f082/python_dotenv-1.0.1-py3-none-any.whl", hash = "sha256:f7b63ef50f1b690dddf550d03497b66d609393b40b564ed0d674909a68ebf16a", size = 19863 },
+]
+
+[[package]]
+name = "pytorch-ignite"
+version = "0.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/1a/2be1d4c080feafa03814d7ea47edeae0184c556f091be75a4e150a627327/pytorch_ignite-0.5.1.tar.gz", hash = "sha256:f41050bb0f85da6a4e5483cbc584ddf300382f537cd2f31cbb05ad62b8a6682e", size = 217296 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/43/db683e79af5ba9dc79e97295d6c7b199856712be680ad1e6751d26413b3f/pytorch_ignite-0.5.1-py3-none-any.whl", hash = "sha256:08c289f59c4185448cf0d97c0ef35f409f640fe1e7355f8fa13e504dcbe47b6d", size = 312685 },
 ]
 
 [[package]]
@@ -1037,7 +1044,7 @@ dependencies = [
     { name = "ipython" },
     { name = "loguru" },
     { name = "opencv-python" },
-    { name = "ptan" },
+    { name = "pytorch-ignite" },
     { name = "seaborn" },
     { name = "tensorboard" },
     { name = "tensorboardx" },
@@ -1052,7 +1059,7 @@ requires-dist = [
     { name = "ipython", specifier = ">=8.30.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "opencv-python", specifier = ">=4.10.0.84" },
-    { name = "ptan", specifier = ">=0.4" },
+    { name = "pytorch-ignite", specifier = ">=0.5.1" },
     { name = "seaborn", specifier = "==0.8.1" },
     { name = "tensorboard", specifier = ">=2.18.0" },
     { name = "tensorboardx", specifier = ">=2.6.2.2" },

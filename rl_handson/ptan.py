@@ -204,11 +204,17 @@ class ExperienceSource:
 
     Every experience contains n list of Experience entries
     """
+
     Item = tt.Tuple[Experience, ...]
 
-    def __init__(self, env: gym.Env | tt.Collection[gym.Env], agent: BaseAgent,
-                 steps_count: int = 2, steps_delta: int = 1,
-                 env_seed: tt.Optional[int] = None):
+    def __init__(
+        self,
+        env: gym.Env | tt.Collection[gym.Env],
+        agent: BaseAgent,
+        steps_count: int = 2,
+        steps_delta: int = 1,
+        env_seed: tt.Optional[int] = None,
+    ):
         """
         Create simple experience source
         :param env: environment or list of environments to be used
@@ -223,7 +229,9 @@ class ExperienceSource:
             # do the check for the multiple copies passed
             ids = set(id(e) for e in env)
             if len(ids) < len(env):
-                raise ValueError("You passed single environment instance multiple times")
+                raise ValueError(
+                    "You passed single environment instance multiple times"
+                )
         else:
             self.pool = [env]
         self.agent = agent
@@ -256,8 +264,18 @@ class ExperienceSource:
                 next_state, r, is_done, is_tr, _ = env.step(action)
                 cur_rewards[idx] += r
                 cur_steps[idx] += 1
-                history.append(Experience(state=state, action=action, reward=r, done_trunc=is_done or is_tr))
-                if len(history) == self.steps_count and iter_idx % self.steps_delta == 0:
+                history.append(
+                    Experience(
+                        state=state,
+                        action=action,
+                        reward=r,
+                        done_trunc=is_done or is_tr,
+                    )
+                )
+                if (
+                    len(history) == self.steps_count
+                    and iter_idx % self.steps_delta == 0
+                ):
                     yield tuple(history)
                 states[idx] = next_state
                 if is_done or is_tr:
@@ -309,9 +327,19 @@ class ExperienceSourceFirstLast(ExperienceSource):
 
     If we have partial trajectory at the end of episode, last_state will be None
     """
-    def __init__(self, env: gym.Env, agent: BaseAgent, gamma: float,
-                 steps_count: int = 1, steps_delta: int = 1, env_seed: tt.Optional[int] = None):
-        super(ExperienceSourceFirstLast, self).__init__(env, agent, steps_count+1, steps_delta, env_seed=env_seed)
+
+    def __init__(
+        self,
+        env: gym.Env,
+        agent: BaseAgent,
+        gamma: float,
+        steps_count: int = 1,
+        steps_delta: int = 1,
+        env_seed: tt.Optional[int] = None,
+    ):
+        super(ExperienceSourceFirstLast, self).__init__(
+            env, agent, steps_count + 1, steps_delta, env_seed=env_seed
+        )
         self.gamma = gamma
         self.steps = steps_count
 
@@ -327,12 +355,21 @@ class ExperienceSourceFirstLast(ExperienceSource):
             for e in reversed(elems):
                 total_reward *= self.gamma
                 total_reward += e.reward
-            yield ExperienceFirstLast(state=exp[0].state, action=exp[0].action,
-                                      reward=total_reward, last_state=last_state)
+            yield ExperienceFirstLast(
+                state=exp[0].state,
+                action=exp[0].action,
+                reward=total_reward,
+                last_state=last_state,
+            )
+
 
 class ExperienceReplayBuffer:
-    def __init__(self, experience_source: tt.Optional[ExperienceSource], buffer_size: int):
-        self.experience_source_iter = None if experience_source is None else iter(experience_source)
+    def __init__(
+        self, experience_source: tt.Optional[ExperienceSource], buffer_size: int
+    ):
+        self.experience_source_iter = (
+            None if experience_source is None else iter(experience_source)
+        )
         self.buffer: tt.List[ExperienceSource.Item] = []
         self.capacity = buffer_size
         self.pos = 0
@@ -372,11 +409,11 @@ class ExperienceReplayBuffer:
             self._add(entry)
 
 
-
 class TargetNet:
     """
     Wrapper around model which provides copy of it instead of trained weights
     """
+
     def __init__(self, model: nn.Module):
         self.model = model
         self.target_model = copy.deepcopy(model)
@@ -396,3 +433,27 @@ class TargetNet:
         for k, v in state.items():
             tgt_state[k] = tgt_state[k] * alpha + (1 - alpha) * v
         self.target_model.load_state_dict(tgt_state)
+
+
+class EpsilonTracker:
+    """
+    Track the epsilon value for the agent,
+    and update a selector accordingly
+    """
+
+    def __init__(
+        self,
+        selector: EpsilonGreedyActionSelector,
+        epsilon_start: float,
+        epsilon_final: float,
+        epsilon_frames: int,
+    ):
+        self.selector = selector
+        self.epsilon_start = epsilon_start
+        self.epsilon_final = epsilon_final
+        self.epsilon_frames = epsilon_frames
+        self.frame(0)
+
+    def frame(self, frame_idx: int):
+        eps = self.epsilon_start - frame_idx / self.epsilon_frames
+        self.selector.epsilon = max(self.epsilon_final, eps)
