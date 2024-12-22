@@ -1,6 +1,6 @@
 import random
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Tuple
 
 import ale_py
@@ -9,22 +9,31 @@ import gymnasium
 import gymnasium as gym
 import torch
 import torch.multiprocessing as mp
+from ignite.contrib.handlers import tensorboard_logger as tb_logger
 from lib import calc_loss_dqn, get_device, wrap_dqn
 from models import DQN
 from ptan import (
     DQNAgent,
+    EndOfEpisodeHandler,
+    EpisodeEvents,
+    EpisodeFPSHandler,
     EpsilonGreedyActionSelector,
     EpsilonTracker,
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
+    PeriodEvents,
+    PeriodicEvents,
     TargetNet,
 )
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
 
 gymnasium.register_envs(ale_py)
+from ignite.engine import Engine
+from ignite.metrics import RunningAverage
 
 SEED = 123
+
 
 
 @dataclass
@@ -49,7 +58,6 @@ class Hyperparams:
     gamma: float = 0.99
     epsilon_start: float = 1.0
     epsilon_final: float = 0.02
-
 
 
 def play_func(params: Hyperparams, net: DQN, dev_name: str, exp_queue: mp.Queue):
@@ -161,12 +169,67 @@ def main():
             "epsilon": batch_generator.epsilon,
         }
 
-    # TODO replace ignite / engine stuff
+    engine = Engine(process_batch)
+    EndOfEpisodeHandler(batch_generator, bound_avg_reward=18.0).attach(engine)
+    EpisodeFPSHandler().attach(engine)
 
-    logdir = f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
+    @engine.on(EpisodeEvents.EPISODE_COMPLETED)
+    def episode_completed(trainer: Engine):
+        print(
+            "Episode %d: reward=%s, steps=%s, speed=%.3f frames/s, elapsed=%s"
+            % (
+                trainer.state.episode,
+                trainer.state.episode_reward,
+                trainer.state.episode_steps,
+                trainer.state.metrics.get("avg_fps", 0),
+                timedelta(seconds=trainer.state.metrics.get("time_passed", 0)),
+            )
+        )
+        trainer.should_terminate = trainer.state.episode > 700
 
-    play_proc.kill()
-    play_proc.join()
+    @engine.on(EpisodeEvents.BOUND_REWARD_REACHED)
+    def game_solved(trainer: Engine):
+        print(
+            "Game solved in %s, after %d episodes and %d iterations!"
+            % (
+                timedelta(seconds=trainer.state.metrics["time_passed"]),
+                trainer.state.episode,
+                trainer.state.iteration,
+            )
+        )
+        trainer.should_terminate = True
+
+    logdir = (
+        f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
+    )
+    tb = tb_logger.TensorboardLogger(log_dir=logdir)
+    RunningAverage(output_transform=lambda v: v["loss"]).attach(engine, "avg_loss")
+
+    episode_handler = tb_logger.OutputHandler(
+        tag="episodes", metric_names=["reward", "steps", "avg_reward"]
+    )
+    tb.attach(
+        engine,
+        log_handler=episode_handler,
+        event_name=EpisodeEvents.EPISODE_COMPLETED,
+    )
+
+    # write to tensorboard every 100 iterations
+    PeriodicEvents().attach(engine)
+    handler = tb_logger.OutputHandler(
+        tag="train", metric_names=["avg_loss", "avg_fps"], output_transform=lambda a: a
+    )
+    tb.attach(
+        engine,
+        log_handler=handler,
+        event_name=PeriodEvents.ITERS_100_COMPLETED,
+    )
+
+    try:
+        engine.run(batch_generator)
+    finally:
+        play_proc.kill()
+        play_proc.join()
 
 
 if __name__ == "__main__":
