@@ -1,9 +1,11 @@
-import datetime
+from datetime import datetime
 import random
 from dataclasses import dataclass
 from typing import List, Tuple
 
+import ale_py
 import fire
+import gymnasium
 import gymnasium as gym
 import torch
 import torch.multiprocessing as mp
@@ -18,6 +20,8 @@ from ptan import (
 )
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
+
+gymnasium.register_envs(ale_py)
 
 SEED = 123
 
@@ -113,6 +117,9 @@ class BatchGenerator:
             yield self.buffer.sample(self.batch_size)
 
 
+DEFAULT_ENV_NAME = "PongNoFrameskip-v4"
+
+
 def main():
     mp.set_start_method("spawn")
 
@@ -121,7 +128,7 @@ def main():
     device = torch.device(get_device())
 
     params = Hyperparams(
-        env_name="PongNoFrameskip-v4",
+        env_name=DEFAULT_ENV_NAME,
         stop_reward=18.0,
         run_name="pong",
         replay_size=100_000,
