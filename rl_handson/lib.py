@@ -346,3 +346,11 @@ def calc_loss_dqn(
 
     bellman_vals = next_state_vals.detach() * gamma + rewards_v
     return nn.MSELoss()(state_action_vals, bellman_vals)
+
+
+def get_device():
+    return (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    )

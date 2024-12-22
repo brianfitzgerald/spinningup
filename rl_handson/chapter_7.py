@@ -1,14 +1,22 @@
+import datetime
+import random
 from dataclasses import dataclass
+from typing import List, Tuple
 
+import fire
 import gymnasium as gym
 import torch
 import torch.multiprocessing as mp
+from lib import calc_loss_dqn, get_device, wrap_dqn
 from models import DQN
-from typing import List, Tuple
-import random
-
-from ptan import DQNAgent, EpsilonGreedyActionSelector, ExperienceReplayBuffer, ExperienceSourceFirstLast
-from lib import calc_loss_dqn, wrap_dqn
+from ptan import (
+    DQNAgent,
+    EpsilonGreedyActionSelector,
+    ExperienceReplayBuffer,
+    ExperienceSourceFirstLast,
+    TargetNet,
+)
+from tensorboardX import SummaryWriter
 from torch.optim import Adam
 
 SEED = 123
@@ -106,35 +114,44 @@ class BatchGenerator:
 
 
 def main():
-    mp.set_start_method('spawn')
+    mp.set_start_method("spawn")
 
     random.seed(SEED)
     torch.manual_seed(SEED)
-    args = parser.parse_args()
-    device = torch.device(args.dev)
+    device = torch.device(get_device())
+
+    params = Hyperparams(
+        env_name="PongNoFrameskip-v4",
+        stop_reward=18.0,
+        run_name="pong",
+        replay_size=100_000,
+        replay_initial=10_000,
+        target_net_sync=1000,
+        epsilon_frames=100_000,
+    )
 
     env = gym.make(params.env_name)
     env = wrap_dqn(env)
 
-    net = DQN(env.observation_space.shape,
-                        env.action_space.n).to(device)
+    net = DQN(env.observation_space.shape, env.action_space.n).to(device)
 
-    tgt_net = ptan.agent.TargetNet(net)
-    optimizer = optim.Adam(net.parameters(), lr=params.learning_rate)
+    tgt_net = TargetNet(net)
+    optimizer = Adam(net.parameters(), lr=params.learning_rate)
 
     # start subprocess and experience queue
     exp_queue = mp.Queue(maxsize=2)
-    proc_args = (params, net, args.dev, exp_queue)
+    proc_args = (params, net, True, exp_queue)
     play_proc = mp.Process(target=play_func, args=proc_args)
     play_proc.start()
     batch_generator = BatchGenerator(
-        params.replay_size, exp_queue,
-        params.replay_initial, params.batch_size)
+        params.replay_size, exp_queue, params.replay_initial, params.batch_size
+    )
 
     def process_batch(engine, batch):
         optimizer.zero_grad()
-        loss_v = calc_loss_dqn(batch, net, tgt_net.target_model,
-                                      gamma=params.gamma, device=device)
+        loss_v = calc_loss_dqn(
+            batch, net, tgt_net.target_model, gamma=params.gamma, device=device
+        )
         loss_v.backward()
         optimizer.step()
         if engine.state.iteration % params.target_net_sync == 0:
@@ -146,11 +163,8 @@ def main():
 
     # TODO replace ignite / engine stuff
 
-    logdir = f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}-{NAME}"
-    tb = tb_logger.TensorboardLogger(log_dir=logdir)
+    logdir = f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
 
-    try:
-        engine.run(batch_generator)
-    finally:
-        play_proc.kill()
-        play_proc.join()
+
+if __name__ == "__main__":
+    fire.Fire(main)

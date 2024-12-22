@@ -58,7 +58,7 @@ import torch.nn as nn
 from gymnasium import Env, ObservationWrapper
 from gymnasium.spaces import Box
 from gymnasium.wrappers import RecordVideo
-from lib import ensure_directory, wrap_dqn
+from lib import ensure_directory, wrap_dqn, get_device
 from tensorboardX import SummaryWriter
 from torch.optim import Adam
 import torch.nn.functional as F
@@ -265,10 +265,6 @@ def calc_loss(
     expected_state_action_values = next_state_values * GAMMA + rewards_t
     # calculate the loss between the predicted and expected state action values
     return F.mse_loss(state_action_values, expected_state_action_values)
-
-
-def get_device():
-    return "cuda" if torch.cuda.is_available() else "mps"
 
 
 def main(env_name: str = DEFAULT_ENV_NAME):

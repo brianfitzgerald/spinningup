@@ -11,6 +11,7 @@ import gymnasium as gym
 from dataclasses import dataclass
 from collections import deque
 import time
+import fire
 
 CPU_DEVICE = torch.device("cpu")
 States = tt.List[np.ndarray] | np.ndarray
@@ -94,7 +95,7 @@ class NNAgent(BaseAgent):
     def __init__(
         self,
         model: nn.Module,
-        action_selector: actions.ActionSelector,
+        action_selector: ActionSelector,
         device: torch.device,
         preprocessor: Preprocessor,
     ):
@@ -370,3 +371,28 @@ class ExperienceReplayBuffer:
             entry = next(self.experience_source_iter)
             self._add(entry)
 
+
+
+class TargetNet:
+    """
+    Wrapper around model which provides copy of it instead of trained weights
+    """
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.target_model = copy.deepcopy(model)
+
+    def sync(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+
+    def alpha_sync(self, alpha):
+        """
+        Blend params of target net with params from the model
+        :param alpha:
+        """
+        assert isinstance(alpha, float)
+        assert 0.0 < alpha <= 1.0
+        state = self.model.state_dict()
+        tgt_state = self.target_model.state_dict()
+        for k, v in state.items():
+            tgt_state[k] = tgt_state[k] * alpha + (1 - alpha) * v
+        self.target_model.load_state_dict(tgt_state)
