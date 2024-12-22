@@ -20,7 +20,7 @@ AgentStates = tt.List[tt.Any]
 Preprocessor = tt.Callable[[States], torch.Tensor]
 
 
-State = np.ndarray
+StateType = np.ndarray
 Action = int
 
 
@@ -314,10 +314,10 @@ class ExperienceSource:
 
 @dataclass(frozen=True)
 class ExperienceFirstLast:
-    state: State
+    state: StateType
     action: Action
     reward: float
-    last_state: tt.Optional[State]
+    last_state: tt.Optional[StateType]
 
 
 class ExperienceSourceFirstLast(ExperienceSource):

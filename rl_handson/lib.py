@@ -348,7 +348,7 @@ def calc_loss_dqn(
     return nn.MSELoss()(state_action_vals, bellman_vals)
 
 
-def get_device():
+def get_device() -> str:
     return (
         "cuda"
         if torch.cuda.is_available()

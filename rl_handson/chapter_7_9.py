@@ -35,7 +35,6 @@ from ignite.metrics import RunningAverage
 SEED = 123
 
 
-
 @dataclass
 class EpisodeEnded:
     reward: float
@@ -60,13 +59,15 @@ class Hyperparams:
     epsilon_final: float = 0.02
 
 
-def play_func(params: Hyperparams, net: DQN, dev_name: str, exp_queue: mp.Queue):
+def play_func(params: Hyperparams, net: DQN, device: str, exp_queue: mp.Queue):
     env = gym.make(params.env_name)
     env = wrap_dqn(env)
-    device = torch.device(dev_name)
+    device = torch.device(device)
 
     selector = EpsilonGreedyActionSelector(epsilon=params.epsilon_start)
-    epsilon_tracker = EpsilonTracker(selector, params)
+    epsilon_tracker = EpsilonTracker(
+        selector, params.epsilon_start, params.epsilon_final, params.epsilon_frames
+    )
     agent = DQNAgent(net, selector, device=device)
     exp_source = ExperienceSourceFirstLast(
         env, agent, gamma=params.gamma, env_seed=SEED
@@ -85,6 +86,7 @@ class BatchGenerator:
         self,
         buffer_size: int,
         exp_queue: mp.Queue,
+        fps_handler: EpisodeFPSHandler,
         initial: int,
         batch_size: int,
     ):
@@ -92,6 +94,7 @@ class BatchGenerator:
             experience_source=None, buffer_size=buffer_size
         )
         self.exp_queue = exp_queue
+        self.fps_handler = fps_handler
         self.initial = initial
         self.batch_size = batch_size
         self._rewards_steps = []
@@ -111,6 +114,7 @@ class BatchGenerator:
                     self.epsilon = exp.epsilon
                 else:
                     self.buffer._add(exp)
+                    self.fps_handler.step()
             if len(self.buffer) < self.initial:
                 continue
             yield self.buffer.sample(self.batch_size)
@@ -124,7 +128,8 @@ def main():
 
     random.seed(SEED)
     torch.manual_seed(SEED)
-    device = torch.device(get_device())
+    device_str = get_device()
+    device = torch.device(device_str)
 
     params = Hyperparams(
         env_name=DEFAULT_ENV_NAME,
@@ -146,14 +151,17 @@ def main():
 
     # start subprocess and experience queue
     exp_queue = mp.Queue(maxsize=2)
-    proc_args = (params, net, True, exp_queue)
+    proc_args = (params, net, device_str, exp_queue)
     play_proc = mp.Process(target=play_func, args=proc_args)
     play_proc.start()
+    fps_handler = EpisodeFPSHandler()
     batch_generator = BatchGenerator(
-        params.replay_size, exp_queue, params.replay_initial, params.batch_size
+        params.replay_size,
+        exp_queue,
+        fps_handler,
+        params.replay_initial,
+        params.batch_size,
     )
-
-    # TODO add the wrapper tweaks
 
     def process_batch(engine, batch):
         optimizer.zero_grad()
@@ -199,9 +207,7 @@ def main():
         )
         trainer.should_terminate = True
 
-    logdir = (
-        f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
-    )
+    logdir = f"runs/{datetime.now().isoformat(timespec='minutes')}-{params.run_name}"
     tb = tb_logger.TensorboardLogger(log_dir=logdir)
     RunningAverage(output_transform=lambda v: v["loss"]).attach(engine, "avg_loss")
 
@@ -209,9 +215,7 @@ def main():
         tag="episodes", metric_names=["reward", "steps", "avg_reward"]
     )
     tb.attach(
-        engine,
-        log_handler=episode_handler,
-        event_name=EpisodeEvents.EPISODE_COMPLETED,
+        engine, log_handler=episode_handler, event_name=EpisodeEvents.EPISODE_COMPLETED
     )
 
     # write to tensorboard every 100 iterations
@@ -219,11 +223,7 @@ def main():
     handler = tb_logger.OutputHandler(
         tag="train", metric_names=["avg_loss", "avg_fps"], output_transform=lambda a: a
     )
-    tb.attach(
-        engine,
-        log_handler=handler,
-        event_name=PeriodEvents.ITERS_100_COMPLETED,
-    )
+    tb.attach(engine, log_handler=handler, event_name=PeriodEvents.ITERS_100_COMPLETED)
 
     try:
         engine.run(batch_generator)
