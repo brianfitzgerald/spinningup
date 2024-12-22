@@ -2,7 +2,7 @@ import abc
 import copy
 import time
 import typing as tt
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Optional
 
@@ -650,3 +650,168 @@ class PolicyAgent(NNAgent):
         if self.apply_softmax:
             return F.softmax(net_out, dim=1), agent_states
         return net_out, agent_states
+
+def vector_rewards(rewards: tt.Deque[np.ndarray], dones: tt.Deque[np.ndarray], gamma: float) -> np.ndarray:
+    """
+    Calculate rewards from vectorized environment for given amount of steps.
+    :param rewards: deque with observed rewards
+    :param dones: deque with bool flags indicating end of episode
+    :param gamma: gamma constant
+    :return: vector with accumulated rewards
+    """
+    res = np.zeros(rewards[0].shape[0], dtype=np.float32)
+    for r, d in zip(reversed(rewards), reversed(dones)):
+        res *= gamma * (1. - d)
+        res += r
+    return res
+
+
+
+class VectorExperienceSourceFirstLast(ExperienceSource):
+    """
+    ExperienceSourceFirstLast which supports VectorEnv from Gymnasium.
+    """
+    def __init__(self, env: gym.vector.VectorEnv, agent: BaseAgent,
+                 gamma: float, steps_count: int = 1, env_seed: tt.Optional[int] = None,
+                 unnest_data: bool = True):
+        """
+        Construct vectorized version of ExperienceSourceFirstLast
+        :param env: vectorized environment
+        :param agent: agent to use
+        :param gamma: gamma for reward calculation
+        :param steps_count: count of steps
+        :param env_seed: seed for environments reset
+        :param unnest_data: should we unnest data in the iterator. If True (default)
+        ExperienceFirstLast will be yielded sequentially. If False, we'll keep them in a list as we
+        got them from env vector.
+        """
+        super().__init__(env, agent, steps_count+1, steps_delta=1, env_seed=env_seed)
+        self.env = env
+        self.gamma = gamma
+        self.steps = steps_count
+        self.unnest_data = unnest_data
+        self.agent_state = self.agent_states[0]
+
+    def _iter_env_idx_obs_next(self, b_obs, b_next_obs) -> tt.Generator[tt.Tuple[
+        int, tt.Any, tt.Any
+    ], None, None]:
+        """
+        Iterate over individual environment observations and next observations.
+        Take into account Tuple observation space (which is handled specially in Vectorized envs)
+        :param b_obs: vectorized observations
+        :param b_next_obs: vectorized next observations
+        :yields: Tuple of index, observation and next observation
+        """
+        if isinstance(self.env.single_observation_space, gym.spaces.Tuple):
+            obs_iter = zip(*b_obs)
+            next_obs_iter = zip(*b_next_obs)
+        else:
+            obs_iter = b_obs
+            next_obs_iter = b_next_obs
+        yield from zip(range(self.env.num_envs), obs_iter, next_obs_iter)
+
+    def __iter__(self) -> tt.Generator[tt.List[ExperienceFirstLast] | ExperienceFirstLast, None, None]:
+        q_states = deque(maxlen=self.steps+1)
+        q_actions = deque(maxlen=self.steps+1)
+        q_rewards = deque(maxlen=self.steps+1)
+        q_dones = deque(maxlen=self.steps+1)
+        total_rewards = np.zeros(self.env.num_envs, dtype=np.float32)
+        total_steps = np.zeros_like(total_rewards, dtype=np.int64)
+
+        if self.env_seed is not None:
+            obs, _ = self.env.reset(seed=self.env_seed)
+        else:
+            obs, _ = self.env.reset()
+        env_indices = np.arange(self.env.num_envs)
+
+        while True:
+            q_states.append(obs)
+            actions, self.agent_state = self.agent(obs, self.agent_state)
+            q_actions.append(actions)
+            next_obs, r, is_done, is_tr, _ = self.env.step(actions)
+            total_rewards += r
+            total_steps += 1
+            done_or_tr = is_done | is_tr
+            q_rewards.append(r)
+            q_dones.append(done_or_tr)
+
+            # process environments which are done at this step
+            if done_or_tr.any():
+                indices = env_indices[done_or_tr]
+                self.total_steps.extend(total_steps[indices])
+                self.total_rewards.extend(total_rewards[indices])
+                total_steps[indices] = 0
+                total_rewards[indices] = 0.0
+
+            if len(q_states) == q_states.maxlen:
+                # enough data for calculation
+                results = []
+                rewards = vector_rewards(q_rewards, q_dones, self.gamma)
+                for i, e_obs, e_next_obs in self._iter_env_idx_obs_next(q_states[0], next_obs):
+                    # if anywhere in the trajectory we have ended episode flag,
+                    # the last state will be None
+                    ep_ended = any(map(lambda d: d[i], q_dones))
+                    last_state = e_next_obs if not ep_ended else None
+                    results.append(ExperienceFirstLast(
+                        state=e_obs,
+                        action=q_actions[0][i],
+                        reward=rewards[i],
+                        last_state=last_state,
+                    ))
+                if self.unnest_data:
+                    yield from results
+                else:
+                    yield results
+            obs = next_obs
+
+
+class TBMeanTracker:
+    """
+    TensorBoard value tracker: allows to batch fixed amount of historical values and write their mean into TB
+
+    Designed and tested with pytorch-tensorboard in mind
+    """
+    def __init__(self, writer, batch_size):
+        """
+        :param writer: writer with close() and add_scalar() methods
+        :param batch_size: integer size of batch to track
+        """
+        assert isinstance(batch_size, int)
+        assert writer is not None
+        self.writer = writer
+        self.batch_size = batch_size
+
+    def __enter__(self):
+        self._batches = defaultdict(list)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.writer.close()
+
+    @staticmethod
+    def _as_float(value):
+        assert isinstance(value, (float, int, np.ndarray, np.generic, torch.autograd.Variable)) or torch.is_tensor(value)
+        tensor_val = None
+        if isinstance(value, torch.autograd.Variable):
+            tensor_val = value.data
+        elif torch.is_tensor(value):
+            tensor_val = value
+
+        if tensor_val is not None:
+            return tensor_val.float().mean().item()
+        elif isinstance(value, np.ndarray):
+            return float(np.mean(value))
+        else:
+            return float(value)
+
+    def track(self, param_name, value, iter_index):
+        assert isinstance(param_name, str)
+        assert isinstance(iter_index, int)
+
+        data = self._batches[param_name]
+        data.append(self._as_float(value))
+
+        if len(data) >= self.batch_size:
+            self.writer.add_scalar(param_name, np.mean(data), iter_index)
+            data.clear()
+

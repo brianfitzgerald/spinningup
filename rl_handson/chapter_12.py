@@ -18,25 +18,24 @@ The 'critic' part of the A2C algorithm is the value network, which estimates the
 
 import typing as tt
 
+from torch.nn.utils.clip_grad import clip_grad_norm_
+import torch.nn.functional as F
 import fire
 import gymnasium as gym
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from gymnasium.wrappers import RecordVideo
-from loguru import logger
-from models import AtariA2C, SimpleLinear
+from lib import RewardTracker, get_device, wrap_dqn
+from models import AtariA2C
 from ptan import (
     ExperienceFirstLast,
-    ExperienceSourceFirstLast,
     PolicyAgent,
+    TBMeanTracker,
+    VectorExperienceSourceFirstLast,
     float32_preprocessor,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
-
-from rl_handson.lib import get_device, wrap_dqn
 
 GAMMA = 0.99
 LEARNING_RATE = 0.001
@@ -104,25 +103,93 @@ def main(use_async: bool = True):
         env = gym.vector.AsyncVectorEnv(env_factories)
     else:
         env = gym.vector.SyncVectorEnv(env_factories)
+
     writer = SummaryWriter(comment="-cartpole-reinforce")
     env = RecordVideo(env, video_folder=f"videos/chapter_11/cartpole")
 
-    net = SimpleLinear(env.observation_space.shape[0], env.action_space.n)
+    net = AtariA2C(env.single_observation_space.shape, env.single_action_space.n).to(
+        device
+    )
 
     agent = PolicyAgent(net, preprocessor=float32_preprocessor, apply_softmax=True)
     # Experience source that returns the first and last states only
     exp_source = VectorExperienceSourceFirstLast(
-        env, agent, gamma=GAMMA, steps_count=REWARD_STEPS)
+        env, agent, gamma=GAMMA, steps_count=REWARD_STEPS
+    )
 
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
-    total_rewards = []
-    done_episodes = 0
+    batch = []
 
-    batch_episodes = 0
-    batch_states, batch_actions, batch_qvals = [], [], []
-    cur_rewards = []
-    writer.close()
+    with RewardTracker(writer, stop_reward=18) as tracker:
+        with TBMeanTracker(writer, batch_size=10) as tb_tracker:
+            for step_idx, exp in enumerate(exp_source):
+                batch.append(exp)
+
+                # get new rewards from the environment
+                new_rewards = exp_source.pop_total_rewards()
+                if new_rewards:
+                    if tracker.reward(new_rewards[0], step_idx):
+                        break
+
+                if len(batch) < BATCH_SIZE:
+                    continue
+
+                states_t, actions_t, vals_ref_t = unpack_batch(
+                    batch, net, device=device, gamma=GAMMA, reward_steps=REWARD_STEPS
+                )
+                batch.clear()
+
+                optimizer.zero_grad()
+
+                logits_t, value_t = net(states_t)
+                loss_value_t = F.mse_loss(value_t.squeeze(-1), vals_ref_t)
+                log_prob_t = F.log_softmax(logits_t, dim=1)
+                # calculate advantage as the difference between the reference value and the value of the state
+                # aka Q(s, a) - V(s) - or the rewards - the value of the state
+                adv_t = vals_ref_t - value_t.detach()
+
+                # get the log probability of the actions taken
+                log_act_t = log_prob_t[range(BATCH_SIZE), actions_t]
+                # multiply the log probability by the advantage
+                log_prob_actions_t = adv_t * log_act_t
+                # calculate the loss as the negative mean of the log probability of the actions taken
+                loss_policy_t = -log_prob_actions_t.mean()
+
+                # entropy bonus to encourage exploration
+                prob_t = F.softmax(logits_t, dim=1)
+                entropy_loss_t = ENTROPY_BETA * (prob_t * log_prob_t).sum(dim=1).mean()
+
+                # calculate policy gradients only
+                loss_policy_t.backward(retain_graph=True)
+                grads = np.concatenate(
+                    [
+                        p.grad.data.cpu().numpy().flatten()
+                        for p in net.parameters()
+                        if p.grad is not None
+                    ]
+                )
+
+                # apply entropy and value gradients
+                loss_v = entropy_loss_t + loss_value_t
+                loss_v.backward()
+                clip_grad_norm_(net.parameters(), CLIP_GRAD)
+                optimizer.step()
+                # get full loss
+                loss_v += loss_policy_t
+
+                tb_tracker.track("advantage", adv_t, step_idx)
+                tb_tracker.track("values", value_t, step_idx)
+                tb_tracker.track("batch_rewards", vals_ref_t, step_idx)
+                tb_tracker.track("loss_entropy", entropy_loss_t, step_idx)
+                tb_tracker.track("loss_policy", loss_policy_t, step_idx)
+                tb_tracker.track("loss_value", loss_value_t, step_idx)
+                tb_tracker.track("loss_total", loss_v, step_idx)
+                tb_tracker.track(
+                    "grad_l2", np.sqrt(np.mean(np.square(grads))), step_idx
+                )
+                tb_tracker.track("grad_max", np.max(np.abs(grads)), step_idx)
+                tb_tracker.track("grad_var", np.var(grads), step_idx)
 
 
 if __name__ == "__main__":
