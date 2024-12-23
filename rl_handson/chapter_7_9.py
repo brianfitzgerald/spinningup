@@ -11,7 +11,7 @@ import torch
 import torch.multiprocessing as mp
 from ignite.contrib.handlers import tensorboard_logger as tb_logger
 from lib import calc_loss_dqn, get_device, wrap_dqn
-from models import DQN
+from models import DQNConvNet
 from ptan import (
     DQNAgent,
     EndOfEpisodeHandler,
@@ -59,7 +59,7 @@ class Hyperparams:
     epsilon_final: float = 0.02
 
 
-def play_func(params: Hyperparams, net: DQN, device: str, exp_queue: mp.Queue):
+def play_func(params: Hyperparams, net: DQNConvNet, device: str, exp_queue: mp.Queue):
     env = gym.make(params.env_name)
     env = wrap_dqn(env)
     device = torch.device(device)
@@ -147,7 +147,7 @@ def main():
     env = gym.make(params.env_name)
     env = wrap_dqn(env)
 
-    net = DQN(env.observation_space.shape, env.action_space.n).to(device)
+    net = DQNConvNet(env.observation_space.shape, env.action_space.n).to(device)
 
     tgt_net = TargetNet(net)
     optimizer = Adam(net.parameters(), lr=params.learning_rate)

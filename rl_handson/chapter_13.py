@@ -15,13 +15,27 @@ from pathlib import Path
 from textworld import text_utils
 import typing as tt
 import gymnasium as gym
+from torch.optim import RMSprop
+import torch
+import numpy as np
+from ignite.engine import Engine
 
 from lib import get_device
 from gymnasium.spaces import Space, Discrete, Sequence
 from textworld.text_utils import extract_vocab_from_gamefiles
 from textworld.gym import register_games
 from textworld import EnvInfos
-from models import DQN
+from models import DQNConvNet
+import itertools
+from ptan import (
+    DQNAgent,
+    Preprocessor,
+    ExperienceSourceFirstLast,
+    ExperienceReplayBuffer,
+)
+from models import DQNConvNet
+import ptan
+from lib_textworld import setup_ignite
 
 
 EXTRA_GAME_INFO = {
@@ -117,7 +131,6 @@ def main(game: str = "simple", suffixes: int = 1, validation: str = "val"):
     print(
         f"Game {val_env_id}, with file {val_game_file} " f"will be used for validation"
     )
-
     env = gym.make(env_id)
     env = preproc.TextWorldPreproc(env, vocab_rev)
     v = env.reset()
@@ -125,25 +138,97 @@ def main(game: str = "simple", suffixes: int = 1, validation: str = "val"):
     val_env = gym.make(val_env_id)
     val_env = preproc.TextWorldPreproc(val_env, vocab_rev)
 
-    prep = preproc.Preprocessor(
+    params = PARAMS[game]
+
+    prep = Preprocessor(
         dict_size=len(vocab),
-        emb_size=params.embeddings, num_sequences=env.num_fields,
-        enc_output_size=params.encoder_size).to(device)
+        emb_size=params.embeddings,
+        num_sequences=env.num_fields,
+        enc_output_size=params.encoder_size,
+    ).to(device)
     tgt_prep = ptan.agent.TargetNet(prep)
 
-    net = DQNModel(obs_size=prep.obs_enc_size,
-                         cmd_size=prep.cmd_enc_size)
+    net = DQNConvNet(obs_size=prep.obs_enc_size, cmd_size=prep.cmd_enc_size)
     net = net.to(device)
     tgt_net = ptan.agent.TargetNet(net)
 
-    agent = model.DQNAgent(net, prep, epsilon=1, device=device)
-    exp_source = ptan.experience.ExperienceSourceFirstLast(
-        env, agent, gamma=GAMMA, steps_count=1)
-    buffer = ptan.experience.ExperienceReplayBuffer(
-        exp_source, params.replay_size)
+    agent = DQNAgent(net, prep, epsilon=1, device=device)
+    exp_source = ExperienceSourceFirstLast(env, agent, gamma=GAMMA, steps_count=1)
+    buffer = ExperienceReplayBuffer(exp_source, params.replay_size)
 
-    optimizer = optim.RMSprop(itertools.chain(net.parameters(), prep.parameters()),
-                              lr=LEARNING_RATE, eps=1e-5)
+    optimizer = RMSprop(
+        itertools.chain(net.parameters(), prep.parameters()), lr=LEARNING_RATE, eps=1e-5
+    )
+
+    def process_batch(engine, batch):
+        optimizer.zero_grad()
+        loss_t = model.calc_loss_dqn(
+            batch, prep, prep, net, tgt_net.target_model, GAMMA, device=device
+        )
+        loss_t.backward()
+        optimizer.step()
+        eps = 1 - engine.state.iteration / params.epsilon_steps
+        agent.epsilon = max(params.epsilon_final, eps)
+        if engine.state.iteration % params.sync_nets == 0:
+            tgt_net.sync()
+        return {
+            "loss": loss_t.item(),
+            "epsilon": agent.epsilon,
+        }
+
+    engine = Engine(process_batch)
+    run_name = f"tr-{params}_{run}"
+    save_path = Path("saves") / run_name
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    setup_ignite(
+        engine, exp_source, run_name, extra_metrics=("val_reward", "val_steps")
+    )
+
+    @engine.on(ptan.ignite.PeriodEvents.ITERS_100_COMPLETED)
+    def validate(engine):
+        reward = 0.0
+        steps = 0
+
+        obs, extra = val_env.reset()
+
+        while True:
+            obs_t = prep.encode_observations([obs]).to(device)
+            cmd_t = prep.encode_commands(obs["admissible_commands"]).to(device)
+            q_vals = net.q_values(obs_t, cmd_t)
+            act = np.argmax(q_vals)
+
+            obs, r, is_done, _, _ = val_env.step(act)
+            steps += 1
+            reward += r
+            if is_done:
+                break
+        engine.state.metrics["val_reward"] = reward
+        engine.state.metrics["val_steps"] = steps
+        print("Validation got %.3f reward in %d steps" % (reward, steps))
+        best_val_reward = getattr(engine.state, "best_val_reward", None)
+        if best_val_reward is None:
+            engine.state.best_val_reward = reward
+        elif best_val_reward < reward:
+            print(
+                "Best validation reward updated: %s -> %s" % (best_val_reward, reward)
+            )
+            save_net_name = save_path / ("best_val_%.3f_n.dat" % reward)
+            torch.save(net.state_dict(), save_net_name)
+            engine.state.best_val_reward = reward
+
+    @engine.on(ptan.ignite.EpisodeEvents.BEST_REWARD_REACHED)
+    def best_reward_updated(trainer: Engine):
+        reward = trainer.state.metrics["avg_reward"]
+        if reward > 0:
+            save_net_name = save_path / ("best_train_%.3f_n.dat" % reward)
+            torch.save(net.state_dict(), save_net_name)
+            print(
+                "%d: best avg training reward: %.3f, saved"
+                % (trainer.state.iteration, reward)
+            )
+
+    engine.run(common.batch_generator(buffer, params.replay_initial, BATCH_SIZE))
 
 
 if __name__ == "__main__":

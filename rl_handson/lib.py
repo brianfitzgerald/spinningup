@@ -16,6 +16,7 @@ from ptan import ExperienceFirstLast
 from torch.utils.tensorboard.writer import SummaryWriter
 from gymnasium.wrappers import RecordVideo
 from loguru import logger
+from typing import List, Optional
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3

@@ -4,10 +4,10 @@ import torch.nn as nn
 from loguru import logger
 
 
-class DQN(nn.Module):
+class DQNConvNet(nn.Module):
 
     def __init__(self, input_shape: tuple[int, int], n_actions: int):
-        super(DQN, self).__init__()
+        super(DQNConvNet, self).__init__()
 
         # convolutional layers, from image input shape to feature maps
         self.conv = nn.Sequential(
@@ -32,15 +32,45 @@ class DQN(nn.Module):
         return self.fc(self.conv(xx))
 
 
+class DQNLinear(nn.Module):
+    def __init__(self, obs_size: int, cmd_size: int, hid_size: int = 256):
+        super(DQNLinear, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(obs_size + cmd_size, hid_size), nn.ReLU(), nn.Linear(hid_size, 1)
+        )
+
+    def forward(self, obs, cmd):
+        x = torch.cat((obs, cmd), dim=1)
+        return self.net(x)
+
+    @torch.no_grad()
+    def q_values(self, obs_t: torch.Tensor, commands_t: torch.Tensor):
+        """
+        Calculate q-values for observation and tensor of commands
+        :param obs_t: preprocessed observation, need to be of [1, obs_size] shape
+        :param commands_t: commands to be evaluated, shape is [N, cmd_size]
+        :return: list of q-values for commands
+        """
+        result = []
+        for cmd_t in commands_t:
+            qval = self(obs_t, cmd_t.unsqueeze(0))[0].cpu().item()
+            result.append(qval)
+        return result
+
+    @torch.no_grad()
+    def q_values_cmd(self, obs_t: torch.Tensor, commands_t: torch.Tensor):
+        x = torch.cat(torch.broadcast_tensors(obs_t.unsqueeze(0), commands_t), dim=1)
+        q_vals = self.net(x)
+        return q_vals.cpu().numpy()[:, 0].tolist()
+
 
 class SimpleLinear(nn.Module):
     def __init__(self, input_size: int, n_actions: int):
         super(SimpleLinear, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(input_size, 128),
-            nn.ReLU(),
-            nn.Linear(128, n_actions)
+            nn.Linear(input_size, 128), nn.ReLU(), nn.Linear(128, n_actions)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -66,16 +96,10 @@ class AtariA2C(nn.Module):
         logger.info(f"Feature size: {size}")
         # Policy network
         self.policy = nn.Sequential(
-            nn.Linear(size, 512),
-            nn.ReLU(),
-            nn.Linear(512, n_actions)
+            nn.Linear(size, 512), nn.ReLU(), nn.Linear(512, n_actions)
         )
         # Value network
-        self.value = nn.Sequential(
-            nn.Linear(size, 512),
-            nn.ReLU(),
-            nn.Linear(512, 1)
-        )
+        self.value = nn.Sequential(nn.Linear(size, 512), nn.ReLU(), nn.Linear(512, 1))
 
     def forward(self, x: torch.ByteTensor) -> Tuple[torch.Tensor, torch.Tensor]:
         xx = x / 255
