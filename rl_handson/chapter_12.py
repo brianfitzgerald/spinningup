@@ -100,7 +100,13 @@ def main(use_async: bool = False):
 
     device = torch.device(get_device())
 
-    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="async" , wrappers=[wrap_dqn], render_mode="rgb_array")
+    env = gym.make_vec(
+        "PongNoFrameskip-v4",
+        NUM_ENVS,
+        vectorization_mode="async",
+        wrappers=[wrap_dqn],
+        render_mode="rgb_array",
+    )
 
     writer = SummaryWriter(comment="-pong-a2c")
 
@@ -108,7 +114,12 @@ def main(use_async: bool = False):
         device
     )
 
-    agent = PolicyAgent(lambda x: net(x)[0], preprocessor=float32_preprocessor, device=device, apply_softmax=True)
+    agent = PolicyAgent(
+        lambda x: net(x)[0],
+        preprocessor=float32_preprocessor,
+        device=device,
+        apply_softmax=True,
+    )
     # Experience source that returns the first and last states only
     exp_source = VectorExperienceSourceFirstLast(
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS
@@ -118,6 +129,7 @@ def main(use_async: bool = False):
 
     batch = []
     best_reward = 0
+    n_games = 0
 
     with RewardTracker(writer, stop_reward=18) as tracker:
         with TBMeanTracker(writer, batch_size=10) as tb_tracker:
@@ -191,10 +203,13 @@ def main(use_async: bool = False):
                 )
                 tb_tracker.track("grad_max", np.max(np.abs(grads)), step_idx)
                 tb_tracker.track("grad_var", np.var(grads), step_idx)
+                n_games += 1
 
-                best_reward_in_batch = vals_ref_t.max() 
-                if vals_ref_t.max() > best_reward:
-                    logger.info(f"Best reward updated: {best_reward} -> {best_reward_in_batch}")
+                best_reward_in_batch = vals_ref_t.max()
+                if vals_ref_t.max() > best_reward and n_games % 100 == 0:
+                    logger.info(
+                        f"Best reward updated: {best_reward} -> {best_reward_in_batch}"
+                    )
                     best_reward = best_reward_in_batch
                     ensure_directory("checkpoints")
                     torch.save(net.state_dict(), f"checkpoints/pong_a2c_{step_idx}.pt")
