@@ -101,14 +101,14 @@ def main(use_async: bool = False):
 
     env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="sync" , wrappers=[wrap_dqn])
 
-    writer = SummaryWriter(comment="-cartpole-reinforce")
+    writer = SummaryWriter(comment="-pong-a2c")
     # env = RecordVideo(env, video_folder=f"videos/chapter_12/a2c")
 
     net = AtariA2C(env.single_observation_space.shape, env.single_action_space.n).to(
         device
     )
 
-    agent = PolicyAgent(net, preprocessor=float32_preprocessor, device=device, apply_softmax=True)
+    agent = PolicyAgent(lambda x: net(x)[0], preprocessor=float32_preprocessor, device=device, apply_softmax=True)
     # Experience source that returns the first and last states only
     exp_source = VectorExperienceSourceFirstLast(
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS
