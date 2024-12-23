@@ -9,11 +9,142 @@ TextWorld also gives intermediate rewards based on steps to solve the game
 
 """
 
-from textworld import gym
-from textworld.gym import register_game
+import fire
+from types import SimpleNamespace
+from pathlib import Path
+from textworld import text_utils
+import typing as tt
+import gymnasium as gym
 
-env_id = register_game("games/t1.ulx")
+from lib import get_device
+from gymnasium.spaces import Space, Discrete, Sequence
+from textworld.text_utils import extract_vocab_from_gamefiles
+from textworld.gym import register_games
+from textworld import EnvInfos
+from models import DQN
 
-env = gym.make(env_id)
 
-print(env)
+EXTRA_GAME_INFO = {
+    "inventory": True,
+    "description": True,
+    "intermediate_reward": True,
+    "admissible_commands": True,
+}
+
+
+PARAMS = {
+    "small": SimpleNamespace(
+        **{
+            "encoder_size": 20,
+            "embeddings": 20,
+            "replay_size": 10000,
+            "replay_initial": 1000,
+            "sync_nets": 100,
+            "epsilon_steps": 1000,
+            "epsilon_final": 0.2,
+        }
+    ),
+    "medium": SimpleNamespace(
+        **{
+            "encoder_size": 256,
+            "embeddings": 128,
+            "replay_size": 100000,
+            "replay_initial": 10000,
+            "sync_nets": 200,
+            "epsilon_steps": 10000,
+            "epsilon_final": 0.2,
+        }
+    ),
+}
+
+
+def get_games_spaces(game_files: tt.List[str]) -> tt.Tuple[
+    tt.Dict[int, str],
+    Space,
+    Space,
+]:
+    """
+    Get games vocabulary, action and observation spaces
+    :param game_files: game files to wrap
+    :return: tuple with dictionary, action and observation spaces
+    """
+    vocab = extract_vocab_from_gamefiles(game_files)
+    vocab_dict = {idx: word for idx, word in enumerate(sorted(vocab))}
+    word_space = Discrete(len(vocab))
+    action_space = Sequence(word_space)
+    observation_space = Sequence(word_space)
+    return vocab_dict, action_space, observation_space
+
+
+def build_rev_vocab(vocab: tt.Dict[int, str]) -> tt.Dict[str, int]:
+    """
+    Build reverse vocabulary
+    :param vocab: forward vocab (int -> word)
+    :return: reverse vocabulary (word -> int)
+    """
+    res = {word: idx for idx, word in vocab.items()}
+    assert len(res) == len(vocab)
+    return res
+
+
+GAMMA = 0.9
+LEARNING_RATE = 5e-5
+BATCH_SIZE = 64
+
+
+def main(game: str = "simple", suffixes: int = 1, validation: str = "val"):
+    device = get_device()
+
+    game_files = ["games/%s%s.ulx" % (game, s) for s in range(1, suffixes + 1)]
+    val_game_file = f"games/{game}{validation}.ulx"
+    if not all(map(lambda p: Path(p).exists(), game_files)):
+        raise RuntimeError(
+            f"Some game files from {game_files} " f"not found! Please run make_games.sh"
+        )
+
+    vocab, action_space, observation_space = get_games_spaces(
+        game_files + [val_game_file]
+    )
+
+    vocab_rev = build_rev_vocab(vocab)
+    env_id = register_games(
+        gamefiles=game_files, request_infos=EnvInfos(**EXTRA_GAME_INFO), name=game
+    )
+    print(f"Registered env {env_id} for game files {game_files}")
+    val_env_id = register_games(
+        gamefiles=[val_game_file], request_infos=EnvInfos(**EXTRA_GAME_INFO), name=game
+    )
+    print(
+        f"Game {val_env_id}, with file {val_game_file} " f"will be used for validation"
+    )
+
+    env = gym.make(env_id)
+    env = preproc.TextWorldPreproc(env, vocab_rev)
+    v = env.reset()
+
+    val_env = gym.make(val_env_id)
+    val_env = preproc.TextWorldPreproc(val_env, vocab_rev)
+
+    prep = preproc.Preprocessor(
+        dict_size=len(vocab),
+        emb_size=params.embeddings, num_sequences=env.num_fields,
+        enc_output_size=params.encoder_size).to(device)
+    tgt_prep = ptan.agent.TargetNet(prep)
+
+    net = DQNModel(obs_size=prep.obs_enc_size,
+                         cmd_size=prep.cmd_enc_size)
+    net = net.to(device)
+    tgt_net = ptan.agent.TargetNet(net)
+
+    agent = model.DQNAgent(net, prep, epsilon=1, device=device)
+    exp_source = ptan.experience.ExperienceSourceFirstLast(
+        env, agent, gamma=GAMMA, steps_count=1)
+    buffer = ptan.experience.ExperienceReplayBuffer(
+        exp_source, params.replay_size)
+
+    optimizer = optim.RMSprop(itertools.chain(net.parameters(), prep.parameters()),
+                              lr=LEARNING_RATE, eps=1e-5)
+
+
+if __name__ == "__main__":
+    fire.Fire(main)
