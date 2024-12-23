@@ -46,7 +46,7 @@ EXTRA_GAME_INFO = {
 
 
 PARAMS = {
-    "small": SimpleNamespace(
+    "simple": SimpleNamespace(
         **{
             "encoder_size": 20,
             "embeddings": 20,

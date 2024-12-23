@@ -3,7 +3,7 @@ import re
 import typing as tt
 import warnings
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, TypeVar
 import torch.nn.functional as F
 
 import gymnasium as gym
@@ -24,6 +24,9 @@ from ptan import (
     PeriodicEvents,
 )
 
+from gymnasium import spaces
+from gymnasium.core import WrapperObsType, WrapperActType
+from gymnasium.envs.registration import EnvSpec
 
 def tokenize(text: str, rev_vocab: Dict[str, int]) -> List[int]:
     """
@@ -79,7 +82,14 @@ class TextWorldPreproc(gym.Wrapper):
         :param tokens_limit: limit tokens in encoded fields
         :param reward_wrong_last_command: if given, this reward will be given if 'last_command' observation field is 'None'.
         """
-        super(TextWorldPreproc, self).__init__(env)
+        # Don't call super constructor, to skip the assert
+        self.env = env
+
+        self._action_space: spaces.Space[WrapperActType] | None = None
+        self._observation_space: spaces.Space[WrapperObsType] | None = None
+        self._metadata: dict[str, Any] | None = None
+
+        self._cached_spec: EnvSpec | None = None
         self._vocab_rev = vocab_rev
         self._encode_raw_text = encode_raw_text
         self._encode_extra_field = tuple(encode_extra_fields)
