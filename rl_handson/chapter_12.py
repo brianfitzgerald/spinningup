@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from gymnasium.wrappers import RecordVideo
-from lib import RewardTracker, get_device, wrap_dqn
+from lib import RewardTracker, ensure_directory, get_device, wrap_dqn
 from models import AtariA2C
 from ptan import (
     ExperienceFirstLast,
@@ -37,6 +37,7 @@ from ptan import (
     float32_preprocessor,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
+from loguru import logger
 
 gym.register_envs(ale_py)
 
@@ -44,7 +45,7 @@ GAMMA = 0.99
 LEARNING_RATE = 0.001
 ENTROPY_BETA = 0.01
 BATCH_SIZE = 128
-NUM_ENVS = 10
+NUM_ENVS = 50
 
 REWARD_STEPS = 4
 CLIP_GRAD = 0.1
@@ -99,7 +100,7 @@ def main(use_async: bool = False):
 
     device = torch.device(get_device())
 
-    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="sync" , wrappers=[wrap_dqn], render_mode="rgb_array")
+    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="async" , wrappers=[wrap_dqn], render_mode="rgb_array")
 
     writer = SummaryWriter(comment="-pong-a2c")
 
@@ -116,6 +117,7 @@ def main(use_async: bool = False):
     optimizer = optim.Adam(net.parameters(), lr=LEARNING_RATE)
 
     batch = []
+    best_reward = 0
 
     with RewardTracker(writer, stop_reward=18) as tracker:
         with TBMeanTracker(writer, batch_size=10) as tb_tracker:
@@ -189,6 +191,13 @@ def main(use_async: bool = False):
                 )
                 tb_tracker.track("grad_max", np.max(np.abs(grads)), step_idx)
                 tb_tracker.track("grad_var", np.var(grads), step_idx)
+
+                best_reward_in_batch = np.mean(new_rewards)
+                if best_reward_in_batch > best_reward:
+                    logger.info(f"Best reward updated: {best_reward} -> {best_reward_in_batch}")
+                    best_reward = best_reward_in_batch
+                    ensure_directory("checkpoints")
+                    torch.save(net.state_dict(), f"checkpoints/pong_a2c_{step_idx}.pt")
 
 
 if __name__ == "__main__":

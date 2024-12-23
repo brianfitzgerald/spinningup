@@ -15,6 +15,7 @@ from gymnasium.spaces import Box
 from ptan import ExperienceFirstLast
 from torch.utils.tensorboard.writer import SummaryWriter
 from gymnasium.wrappers import RecordVideo
+from loguru import logger
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3
@@ -298,7 +299,7 @@ def wrap_dqn(
     return env
 
 
-def ensure_directory(directory: str, clear: bool = True):
+def ensure_directory(directory: str, clear: bool = False):
     """
     Create a directory and parents if it doesn't exist, and clear it if it does.
     """
@@ -384,7 +385,7 @@ class RewardTracker:
         self.ts = time.time()
         mean_reward = np.mean(self.total_rewards[-100:])
         epsilon_str = "" if epsilon is None else ", eps %.2f" % epsilon
-        print(
+        logger.info(
             "%d: done %d games, mean reward %.3f, speed %.2f f/s%s"
             % (frame, len(self.total_rewards), mean_reward, speed, epsilon_str)
         )
@@ -394,6 +395,6 @@ class RewardTracker:
         self.writer.add_scalar("reward_100", mean_reward, frame)
         self.writer.add_scalar("reward", reward, frame)
         if mean_reward > self.stop_reward:
-            print("Solved in %d frames!" % frame)
+            logger.info("Solved in %d frames!" % frame)
             return True
         return False
