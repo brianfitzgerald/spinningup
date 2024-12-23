@@ -85,8 +85,9 @@ class EpisodicLifeEnv(gym.Wrapper):
         :param kwargs: Extra keywords passed to env.reset() call
         :return: the first observation of the environment
         """
+        info = None
         if self.was_real_done:
-            obs = self.env.reset(**kwargs)
+            obs, info = self.env.reset(**kwargs)
         else:
             # no-op step to advance from terminal/lost life state
             obs, _, terminated, truncated, _ = self.env.step(0)
@@ -97,7 +98,7 @@ class EpisodicLifeEnv(gym.Wrapper):
             if terminated or truncated:
                 obs, extra = self.env.reset(**kwargs)
         self.lives = self.env.unwrapped.ale.lives()
-        return obs
+        return obs, info
 
 
 class ClipRewardEnv(gym.RewardWrapper):
@@ -134,13 +135,13 @@ class FireResetEnv(gym.Wrapper):
 
     def reset(self, **kwargs) -> np.ndarray:
         self.env.reset(**kwargs)
-        obs, _, finished, terminated, _ = self.env.step(1)
-        if finished or terminated:
+        obs, _, terminated, truncated, info = self.env.step(1)
+        if terminated or truncated:
             self.env.reset(**kwargs)
-        obs, _, finished, terminated, _ = self.env.step(2)
-        if finished or terminated:
+        obs, _, terminated, truncated, info = self.env.step(2)
+        if terminated or truncated:
             self.env.reset(**kwargs)
-        return obs
+        return obs, info
 
 
 class WarpFrame(gym.ObservationWrapper):
@@ -156,8 +157,8 @@ class WarpFrame(gym.ObservationWrapper):
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[WrapperObsType, dict[str, Any]]:
-        obs = self.env.reset(seed=seed, options=options)
-        return self.observation(obs), None
+        obs, info = self.env.reset(seed=seed, options=options)
+        return self.observation(obs), info
 
     def __init__(self, env: gym.Env, width: int = 84, height: int = 84) -> None:
         super().__init__(env)
@@ -188,7 +189,7 @@ class AtariWrapper(gym.Wrapper[np.ndarray, int, np.ndarray, int]):
     def __init__(
         self,
         env: gym.Env,
-        noop_max: int = 30,
+        noop_max: int = 0,
         frame_skip: int = 4,
         screen_size: int = 84,
         terminal_on_life_loss: bool = True,

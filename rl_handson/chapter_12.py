@@ -17,6 +17,7 @@ The 'critic' part of the A2C algorithm is the value network, which estimates the
 """
 
 import typing as tt
+import ale_py
 
 from torch.nn.utils.clip_grad import clip_grad_norm_
 import torch.nn.functional as F
@@ -37,11 +38,13 @@ from ptan import (
 )
 from torch.utils.tensorboard.writer import SummaryWriter
 
+gym.register_envs(ale_py)
+
 GAMMA = 0.99
 LEARNING_RATE = 0.001
 ENTROPY_BETA = 0.01
 BATCH_SIZE = 128
-NUM_ENVS = 50
+NUM_ENVS = 10
 
 REWARD_STEPS = 4
 CLIP_GRAD = 0.1
@@ -92,26 +95,20 @@ def unpack_batch(
     return states_t, actions_t, ref_vals_t
 
 
-def main(use_async: bool = True):
+def main(use_async: bool = False):
 
     device = torch.device(get_device())
 
-    env_factories = [
-        lambda: wrap_dqn(gym.make("PongNoFrameskip-v4")) for _ in range(NUM_ENVS)
-    ]
-    if use_async:
-        env = gym.vector.AsyncVectorEnv(env_factories)
-    else:
-        env = gym.vector.SyncVectorEnv(env_factories)
+    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="sync" , wrappers=[wrap_dqn])
 
     writer = SummaryWriter(comment="-cartpole-reinforce")
-    env = RecordVideo(env, video_folder=f"videos/chapter_11/cartpole")
+    # env = RecordVideo(env, video_folder=f"videos/chapter_12/a2c")
 
     net = AtariA2C(env.single_observation_space.shape, env.single_action_space.n).to(
         device
     )
 
-    agent = PolicyAgent(net, preprocessor=float32_preprocessor, apply_softmax=True)
+    agent = PolicyAgent(net, preprocessor=float32_preprocessor, device=device, apply_softmax=True)
     # Experience source that returns the first and last states only
     exp_source = VectorExperienceSourceFirstLast(
         env, agent, gamma=GAMMA, steps_count=REWARD_STEPS
@@ -143,6 +140,8 @@ def main(use_async: bool = True):
                 optimizer.zero_grad()
 
                 logits_t, value_t = net(states_t)
+                # MSE loss between the reference values and the value of the state
+                # the ref values are taken from the Bellman equation
                 loss_value_t = F.mse_loss(value_t.squeeze(-1), vals_ref_t)
                 log_prob_t = F.log_softmax(logits_t, dim=1)
                 # calculate advantage as the difference between the reference value and the value of the state
@@ -162,6 +161,7 @@ def main(use_async: bool = True):
 
                 # calculate policy gradients only
                 loss_policy_t.backward(retain_graph=True)
+                # get the grads for logging purposes
                 grads = np.concatenate(
                     [
                         p.grad.data.cpu().numpy().flatten()
