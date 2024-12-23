@@ -7,6 +7,7 @@
             "request": "launch",
             "program": "rl_handson/chapter_13.py",
             "console": "integratedTerminal",
+            "justMyCode": false
         },
         {
             "name": "Chapter 12",

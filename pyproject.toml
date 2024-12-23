@@ -20,7 +20,7 @@ dependencies = [
     "gymnasium[classic-control,other]>=1.0.0",
     "torch>=2.5.1",
     "pytorch-ignite>=0.5.1",
-    "textworld>=1.6.1",
+    "textworld[vis]>=1.6.1",
     "black>=24.10.0",
 ]
 

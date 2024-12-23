@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import fire
-import gymnasium as gym
 import numpy as np
 import ptan
 import torch
@@ -33,9 +32,10 @@ from ptan import (
     Preprocessor,
 )
 from textworld import EnvInfos
-from textworld.gym import register_games
+from textworld.gym import register_games, register_game
 from textworld.text_utils import extract_vocab_from_gamefiles
 from torch.optim import RMSprop
+from textworld import gym
 
 EXTRA_GAME_INFO = {
     "inventory": True,
@@ -107,7 +107,7 @@ BATCH_SIZE = 64
 
 def main(
     game: str = "simple",
-    suffixes: int = 1,
+    suffixes: int = 20,
     validation: str = "val",
     run_name: str = "run",
 ):
