@@ -14,7 +14,6 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.utils.tensorboard as tb_logger
 from ignite.engine import Engine
 from ignite.metrics import RunningAverage
-from models import DQNLinear
 from ptan import (
     EndOfEpisodeHandler,
     EpisodeEvents,
@@ -319,7 +318,7 @@ class Preprocessor(nn.Module):
 def unpack_batch(
     batch: List[ExperienceFirstLast],
     preprocessor: Preprocessor,
-    net: DQNLinear,
+    net: nn.Module,
     device="cpu",
 ):
     """
