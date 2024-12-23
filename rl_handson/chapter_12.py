@@ -192,8 +192,8 @@ def main(use_async: bool = False):
                 tb_tracker.track("grad_max", np.max(np.abs(grads)), step_idx)
                 tb_tracker.track("grad_var", np.var(grads), step_idx)
 
-                best_reward_in_batch = np.mean(new_rewards)
-                if best_reward_in_batch > best_reward:
+                best_reward_in_batch = vals_ref_t.max() 
+                if vals_ref_t.max() > best_reward:
                     logger.info(f"Best reward updated: {best_reward} -> {best_reward_in_batch}")
                     best_reward = best_reward_in_batch
                     ensure_directory("checkpoints")
