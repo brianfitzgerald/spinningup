@@ -12,3 +12,4 @@ videos/
 .venv
 runs/
 checkpoints/
+games/
