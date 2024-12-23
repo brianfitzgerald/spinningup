@@ -99,10 +99,9 @@ def main(use_async: bool = False):
 
     device = torch.device(get_device())
 
-    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="sync" , wrappers=[wrap_dqn])
+    env = gym.make_vec("PongNoFrameskip-v4", NUM_ENVS, vectorization_mode="sync" , wrappers=[wrap_dqn], render_mode="rgb_array")
 
     writer = SummaryWriter(comment="-pong-a2c")
-    # env = RecordVideo(env, video_folder=f"videos/chapter_12/a2c")
 
     net = AtariA2C(env.single_observation_space.shape, env.single_action_space.n).to(
         device

@@ -14,6 +14,7 @@ from gymnasium.core import WrapperObsType
 from gymnasium.spaces import Box
 from ptan import ExperienceFirstLast
 from torch.utils.tensorboard.writer import SummaryWriter
+from gymnasium.wrappers import RecordVideo
 
 """
 Have to overwrite a lot of environment wrappers from stable_baselines3
@@ -271,6 +272,7 @@ def wrap_dqn(
     episodic_life: bool = True,
     clip_reward: bool = True,
     noop_max: int = 0,
+    record_video: bool = True,
 ) -> gym.Env:
     """
     Apply a common set of wrappers for Atari games.
@@ -291,6 +293,8 @@ def wrap_dqn(
     env = ImageToPyTorch(env)
     if stack_frames > 1:
         env = BufferWrapper(env, stack_frames)
+    if record_video:
+        env = RecordVideo(env, video_folder="videos")
     return env
 
 
