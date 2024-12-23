@@ -1,3 +1,4 @@
+import logging
 import re
 import typing as tt
 import warnings
@@ -5,13 +6,19 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
 import gymnasium as gym
+import textworld.gym.envs
+import torch
+import torch.nn as nn
+import torch.nn.utils.rnn as rnn_utils
 import torch.utils.tensorboard as tb_logger
 from ignite.engine import Engine
 from ignite.metrics import RunningAverage
+from models import DQNLinear
 from ptan import (
     EndOfEpisodeHandler,
     EpisodeEvents,
     EpisodeFPSHandler,
+    ExperienceFirstLast,
     PeriodEvents,
     PeriodicEvents,
 )
@@ -208,3 +215,151 @@ def setup_ignite(
     )
     event = PeriodEvents.ITERS_100_COMPLETED
     tb.attach(engine, log_handler=handler, event_name=event)
+
+
+class Encoder(nn.Module):
+    """
+    Takes input sequences (after embeddings) and returns
+    the hidden state from LSTM
+    """
+
+    def __init__(self, emb_size: int, out_size: int):
+        super(Encoder, self).__init__()
+        self.net = nn.LSTM(input_size=emb_size, hidden_size=out_size, batch_first=True)
+
+    def forward(self, x):
+        self.net.flatten_parameters()
+        _, hid_cell = self.net(x)
+        # Warn: if bidir=True or several layers,
+        # sequeeze has to be changed!
+        return hid_cell[0].squeeze(0)
+
+
+class Preprocessor(nn.Module):
+    """
+    Takes batch of several input sequences and outputs their
+    summary from one or many encoders
+    """
+
+    def __init__(
+        self,
+        dict_size: int,
+        emb_size: int,
+        num_sequences: int,
+        enc_output_size: int,
+        extra_flags: tt.Sequence[str] = (),
+    ):
+        """
+        :param dict_size: amount of words is our vocabulary
+        :param emb_size: dimensionality of embeddings
+        :param num_sequences: count of sequences
+        :param enc_output_size: output from single encoder
+        :param extra_flags: list of fields from observations
+        to encode as numbers
+        """
+        super(Preprocessor, self).__init__()
+        self._extra_flags = extra_flags
+        self._enc_output_size = enc_output_size
+        self.emb = nn.Embedding(num_embeddings=dict_size, embedding_dim=emb_size)
+        self.encoders = []
+        for idx in range(num_sequences):
+            enc = Encoder(emb_size, enc_output_size)
+            self.encoders.append(enc)
+            self.add_module(f"enc_{idx}", enc)
+        self.enc_commands = Encoder(emb_size, enc_output_size)
+
+    @property
+    def obs_enc_size(self):
+        return self._enc_output_size * len(self.encoders) + len(self._extra_flags)
+
+    @property
+    def cmd_enc_size(self):
+        return self._enc_output_size
+
+    def _apply_encoder(self, batch: tt.List[tt.List[int]], encoder: Encoder):
+        dev = self.emb.weight.device
+        batch_t = [self.emb(torch.tensor(sample).to(dev)) for sample in batch]
+        batch_seq = rnn_utils.pack_sequence(batch_t, enforce_sorted=False)
+        return encoder(batch_seq)
+
+    def encode_observations(self, observations: tt.List[dict]) -> torch.Tensor:
+        sequences = [obs[TextWorldPreproc.OBS_FIELD] for obs in observations]
+        res_t = self.encode_sequences(sequences)
+        if not self._extra_flags:
+            return res_t
+        extra = [[obs[field] for field in self._extra_flags] for obs in observations]
+        extra_t = torch.Tensor(extra).to(res_t.device)
+        res_t = torch.cat([res_t, extra_t], dim=1)
+        return res_t
+
+    def encode_sequences(self, batches):
+        """
+        Forward pass of Preprocessor
+        :param batches: list of tuples with variable-length sequences of word ids
+        :return: tensor with concatenated encoder outputs for every batch sample
+        """
+        data = []
+        for enc, enc_batch in zip(self.encoders, zip(*batches)):
+            data.append(self._apply_encoder(enc_batch, enc))
+        res_t = torch.cat(data, dim=1)
+        return res_t
+
+    def encode_commands(self, batch):
+        """
+        Apply encoder to list of commands sequence
+        :param batch: list of lists of idx
+        :return: tensor with encoded commands in original order
+        """
+        return self._apply_encoder(batch, self.enc_commands)
+
+
+@torch.no_grad()
+def unpack_batch(
+    batch: List[ExperienceFirstLast],
+    preprocessor: Preprocessor,
+    net: DQNLinear,
+    device="cpu",
+):
+    """
+    Convert batch to data needed for Bellman step
+    :param batch: list of ptan.Experience objects
+    :param preprocessor: emb.Preprocessor instance
+    :param net: network to be used for next state approximation
+    :param device: torch device
+    :return: tuple (list of states, list of taken commands,
+                    list of rewards, list of best Qs for the next s)
+    """
+    # calculate Qs for next states
+    states, taken_commands, rewards, best_q = [], [], [], []
+    last_states, last_commands, last_offsets = [], [], []
+    for exp in batch:
+        states.append(exp.state)
+        taken_commands.append(exp.state["admissible_commands"][exp.action])
+        rewards.append(exp.reward)
+
+        # calculate best Q value for the next state
+        if exp.last_state is None:
+            # final state in the episode, Q=0
+            last_offsets.append(len(last_commands))
+        else:
+            assert isinstance(exp.last_state, dict)
+            last_states.append(exp.last_state)
+            last_commands.extend(exp.last_state["admissible_commands"])
+            last_offsets.append(len(last_commands))
+
+    obs_t = preprocessor.encode_observations(last_states).to(device)
+    commands_t = preprocessor.encode_commands(last_commands).to(device)
+
+    prev_ofs = 0
+    obs_ofs = 0
+    for ofs in last_offsets:
+        if prev_ofs == ofs:
+            best_q.append(0.0)
+        else:
+            q_vals = net.q_values(
+                obs_t[obs_ofs : obs_ofs + 1], commands_t[prev_ofs:ofs]
+            )
+            best_q.append(max(q_vals))
+            obs_ofs += 1
+        prev_ofs = ofs
+    return states, taken_commands, rewards, best_q

@@ -35,7 +35,7 @@ from ptan import (
 )
 from models import DQNConvNet
 import ptan
-from lib_textworld import setup_ignite
+from lib_textworld import TextWorldPreproc, setup_ignite
 
 
 EXTRA_GAME_INFO = {
@@ -106,7 +106,12 @@ LEARNING_RATE = 5e-5
 BATCH_SIZE = 64
 
 
-def main(game: str = "simple", suffixes: int = 1, validation: str = "val"):
+def main(
+    game: str = "simple",
+    suffixes: int = 1,
+    validation: str = "val",
+    run_name: str = "run",
+):
     device = get_device()
 
     game_files = ["games/%s%s.ulx" % (game, s) for s in range(1, suffixes + 1)]
@@ -132,11 +137,11 @@ def main(game: str = "simple", suffixes: int = 1, validation: str = "val"):
         f"Game {val_env_id}, with file {val_game_file} " f"will be used for validation"
     )
     env = gym.make(env_id)
-    env = preproc.TextWorldPreproc(env, vocab_rev)
+    env = TextWorldPreproc(env, vocab_rev)
     v = env.reset()
 
     val_env = gym.make(val_env_id)
-    val_env = preproc.TextWorldPreproc(val_env, vocab_rev)
+    val_env = TextWorldPreproc(val_env, vocab_rev)
 
     params = PARAMS[game]
 
