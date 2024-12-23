@@ -1,20 +1,24 @@
-import logging
+import random
 import re
 import typing as tt
 import warnings
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional, TypeVar
-import torch.nn.functional as F
+from typing import Any, Dict, Iterable, List, Optional
+import numpy as np
 
 import gymnasium as gym
-import textworld.gym.envs
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
 import torch.utils.tensorboard as tb_logger
+from gymnasium import spaces
+from gymnasium.core import WrapperActType, WrapperObsType
+from gymnasium.envs.registration import EnvSpec
 from ignite.engine import Engine
 from ignite.metrics import RunningAverage
 from ptan import (
+    BaseAgent,
     EndOfEpisodeHandler,
     EpisodeEvents,
     EpisodeFPSHandler,
@@ -24,9 +28,6 @@ from ptan import (
     PeriodicEvents,
 )
 
-from gymnasium import spaces
-from gymnasium.core import WrapperObsType, WrapperActType
-from gymnasium.envs.registration import EnvSpec
 
 def tokenize(text: str, rev_vocab: Dict[str, int]) -> List[int]:
     """
@@ -396,3 +397,45 @@ def calc_loss_dqn(
     tgt_q_t = torch.tensor(rewards) + gamma * torch.tensor(next_best_qs)
     tgt_q_t = tgt_q_t.to(device)
     return F.mse_loss(q_values_t.squeeze(-1), tgt_q_t)
+
+
+class DQNAgent(BaseAgent):
+    def __init__(
+        self,
+        net: nn.Module,
+        preprocessor: Preprocessor,
+        epsilon: float = 0.0,
+        device="cpu",
+    ):
+        self.net = net
+        self._prepr = preprocessor
+        self._epsilon = epsilon
+        self.device = device
+
+    @property
+    def epsilon(self):
+        return self._epsilon
+
+    @epsilon.setter
+    def epsilon(self, value: float):
+        if 0.0 <= value <= 1.0:
+            self._epsilon = value
+
+    @torch.no_grad()
+    def __call__(self, states, agent_states=None):
+        if agent_states is None:
+            agent_states = [None] * len(states)
+
+        # for every state in the batch, calculate
+        actions = []
+        for state in states:
+            commands = state["admissible_commands"]
+            if random.random() <= self.epsilon:
+                actions.append(random.randrange(len(commands)))
+            else:
+                obs_t = self._prepr.encode_observations([state]).to(self.device)
+                commands_t = self._prepr.encode_commands(commands)
+                commands_t = commands_t.to(self.device)
+                q_vals = self.net.q_values(obs_t, commands_t)
+                actions.append(np.argmax(q_vals))
+        return actions, agent_states

@@ -21,15 +21,21 @@ import torch
 from gymnasium.spaces import Discrete, Sequence, Space
 from ignite.engine import Engine
 from lib import get_device
-from lib_textworld import TextWorldPreproc, batch_generator, calc_loss_dqn, setup_ignite
-from models import DQNConvNet
+from lib_textworld import (
+    TextWorldPreproc,
+    batch_generator,
+    calc_loss_dqn,
+    setup_ignite,
+    Preprocessor,
+    DQNAgent
+)
+from models import DQNConvNet, DQNLinear
 from ptan import (
-    DQNAgent,
     EpisodeEvents,
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
     PeriodEvents,
-    Preprocessor,
+    TargetNet,
 )
 from textworld import EnvInfos
 from textworld.gym import register_games, register_game
@@ -150,11 +156,11 @@ def main(
         num_sequences=env.num_fields,
         enc_output_size=params.encoder_size,
     ).to(device)
-    tgt_prep = ptan.agent.TargetNet(prep)
+    tgt_prep = TargetNet(prep)
 
-    net = DQNConvNet(obs_size=prep.obs_enc_size, cmd_size=prep.cmd_enc_size)
+    net = DQNLinear(obs_size=prep.obs_enc_size, cmd_size=prep.cmd_enc_size)
     net = net.to(device)
-    tgt_net = ptan.agent.TargetNet(net)
+    tgt_net = TargetNet(net)
 
     agent = DQNAgent(net, prep, epsilon=1, device=device)
     exp_source = ExperienceSourceFirstLast(env, agent, gamma=GAMMA, steps_count=1)
