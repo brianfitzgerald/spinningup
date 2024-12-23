@@ -9,34 +9,33 @@ TextWorld also gives intermediate rewards based on steps to solve the game
 
 """
 
-import fire
-from types import SimpleNamespace
-from pathlib import Path
-from textworld import text_utils
-import typing as tt
-import gymnasium as gym
-from torch.optim import RMSprop
-import torch
-import numpy as np
-from ignite.engine import Engine
-
-from lib import get_device
-from gymnasium.spaces import Space, Discrete, Sequence
-from textworld.text_utils import extract_vocab_from_gamefiles
-from textworld.gym import register_games
-from textworld import EnvInfos
-from models import DQNConvNet
 import itertools
+import typing as tt
+from pathlib import Path
+from types import SimpleNamespace
+
+import fire
+import gymnasium as gym
+import numpy as np
+import ptan
+import torch
+from gymnasium.spaces import Discrete, Sequence, Space
+from ignite.engine import Engine
+from lib import get_device
+from lib_textworld import TextWorldPreproc, batch_generator, calc_loss_dqn, setup_ignite
+from models import DQNConvNet
 from ptan import (
     DQNAgent,
-    Preprocessor,
-    ExperienceSourceFirstLast,
+    EpisodeEvents,
     ExperienceReplayBuffer,
+    ExperienceSourceFirstLast,
+    PeriodEvents,
+    Preprocessor,
 )
-from models import DQNConvNet
-import ptan
-from lib_textworld import TextWorldPreproc, setup_ignite
-
+from textworld import EnvInfos
+from textworld.gym import register_games
+from textworld.text_utils import extract_vocab_from_gamefiles
+from torch.optim import RMSprop
 
 EXTRA_GAME_INFO = {
     "inventory": True,
@@ -167,7 +166,7 @@ def main(
 
     def process_batch(engine, batch):
         optimizer.zero_grad()
-        loss_t = model.calc_loss_dqn(
+        loss_t = calc_loss_dqn(
             batch, prep, prep, net, tgt_net.target_model, GAMMA, device=device
         )
         loss_t.backward()
@@ -182,7 +181,7 @@ def main(
         }
 
     engine = Engine(process_batch)
-    run_name = f"tr-{params}_{run}"
+    run_name = f"tr-{params}_{run_name}"
     save_path = Path("saves") / run_name
     save_path.mkdir(parents=True, exist_ok=True)
 
@@ -190,7 +189,7 @@ def main(
         engine, exp_source, run_name, extra_metrics=("val_reward", "val_steps")
     )
 
-    @engine.on(ptan.ignite.PeriodEvents.ITERS_100_COMPLETED)
+    @engine.on(PeriodEvents.ITERS_100_COMPLETED)
     def validate(engine):
         reward = 0.0
         steps = 0
@@ -222,7 +221,7 @@ def main(
             torch.save(net.state_dict(), save_net_name)
             engine.state.best_val_reward = reward
 
-    @engine.on(ptan.ignite.EpisodeEvents.BEST_REWARD_REACHED)
+    @engine.on(EpisodeEvents.BEST_REWARD_REACHED)
     def best_reward_updated(trainer: Engine):
         reward = trainer.state.metrics["avg_reward"]
         if reward > 0:
@@ -233,7 +232,7 @@ def main(
                 % (trainer.state.iteration, reward)
             )
 
-    engine.run(common.batch_generator(buffer, params.replay_initial, BATCH_SIZE))
+    engine.run(batch_generator(buffer, params.replay_initial, BATCH_SIZE))
 
 
 if __name__ == "__main__":

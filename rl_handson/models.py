@@ -110,10 +110,12 @@ class AtariA2C(nn.Module):
         return self.policy(conv_out), self.value(conv_out)
 
 
-def calc_loss_dqn(batch, preprocessor, tgt_preprocessor, net,
-                  tgt_net, gamma, device="cpu"):
-    states, taken_commands, rewards, next_best_qs = \
-        unpack_batch(batch, tgt_preprocessor, tgt_net, device)
+def calc_loss_dqn(
+    batch, preprocessor, tgt_preprocessor, net, tgt_net, gamma, device="cpu"
+):
+    states, taken_commands, rewards, next_best_qs = unpack_batch(
+        batch, tgt_preprocessor, tgt_net, device
+    )
 
     obs_t = preprocessor.encode_observations(states).to(device)
     cmds_t = preprocessor.encode_commands(taken_commands).to(device)

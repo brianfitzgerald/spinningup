@@ -651,7 +651,10 @@ class PolicyAgent(NNAgent):
             return F.softmax(net_out, dim=1), agent_states
         return net_out, agent_states
 
-def vector_rewards(rewards: tt.Deque[np.ndarray], dones: tt.Deque[np.ndarray], gamma: float) -> np.ndarray:
+
+def vector_rewards(
+    rewards: tt.Deque[np.ndarray], dones: tt.Deque[np.ndarray], gamma: float
+) -> np.ndarray:
     """
     Calculate rewards from vectorized environment for given amount of steps.
     :param rewards: deque with observed rewards
@@ -661,19 +664,25 @@ def vector_rewards(rewards: tt.Deque[np.ndarray], dones: tt.Deque[np.ndarray], g
     """
     res = np.zeros(rewards[0].shape[0], dtype=np.float32)
     for r, d in zip(reversed(rewards), reversed(dones)):
-        res *= gamma * (1. - d)
+        res *= gamma * (1.0 - d)
         res += r
     return res
-
 
 
 class VectorExperienceSourceFirstLast(ExperienceSource):
     """
     ExperienceSourceFirstLast which supports VectorEnv from Gymnasium.
     """
-    def __init__(self, env: gym.vector.VectorEnv, agent: BaseAgent,
-                 gamma: float, steps_count: int = 1, env_seed: tt.Optional[int] = None,
-                 unnest_data: bool = True):
+
+    def __init__(
+        self,
+        env: gym.vector.VectorEnv,
+        agent: BaseAgent,
+        gamma: float,
+        steps_count: int = 1,
+        env_seed: tt.Optional[int] = None,
+        unnest_data: bool = True,
+    ):
         """
         Construct vectorized version of ExperienceSourceFirstLast
         :param env: vectorized environment
@@ -685,16 +694,16 @@ class VectorExperienceSourceFirstLast(ExperienceSource):
         ExperienceFirstLast will be yielded sequentially. If False, we'll keep them in a list as we
         got them from env vector.
         """
-        super().__init__(env, agent, steps_count+1, steps_delta=1, env_seed=env_seed)
+        super().__init__(env, agent, steps_count + 1, steps_delta=1, env_seed=env_seed)
         self.env = env
         self.gamma = gamma
         self.steps = steps_count
         self.unnest_data = unnest_data
         self.agent_state = self.agent_states[0]
 
-    def _iter_env_idx_obs_next(self, b_obs, b_next_obs) -> tt.Generator[tt.Tuple[
-        int, tt.Any, tt.Any
-    ], None, None]:
+    def _iter_env_idx_obs_next(
+        self, b_obs, b_next_obs
+    ) -> tt.Generator[tt.Tuple[int, tt.Any, tt.Any], None, None]:
         """
         Iterate over individual environment observations and next observations.
         Take into account Tuple observation space (which is handled specially in Vectorized envs)
@@ -710,11 +719,13 @@ class VectorExperienceSourceFirstLast(ExperienceSource):
             next_obs_iter = b_next_obs
         yield from zip(range(self.env.num_envs), obs_iter, next_obs_iter)
 
-    def __iter__(self) -> tt.Generator[tt.List[ExperienceFirstLast] | ExperienceFirstLast, None, None]:
-        q_states = deque(maxlen=self.steps+1)
-        q_actions = deque(maxlen=self.steps+1)
-        q_rewards = deque(maxlen=self.steps+1)
-        q_dones = deque(maxlen=self.steps+1)
+    def __iter__(
+        self,
+    ) -> tt.Generator[tt.List[ExperienceFirstLast] | ExperienceFirstLast, None, None]:
+        q_states = deque(maxlen=self.steps + 1)
+        q_actions = deque(maxlen=self.steps + 1)
+        q_rewards = deque(maxlen=self.steps + 1)
+        q_dones = deque(maxlen=self.steps + 1)
         total_rewards = np.zeros(self.env.num_envs, dtype=np.float32)
         total_steps = np.zeros_like(total_rewards, dtype=np.int64)
 
@@ -747,17 +758,21 @@ class VectorExperienceSourceFirstLast(ExperienceSource):
                 # enough data for calculation
                 results = []
                 rewards = vector_rewards(q_rewards, q_dones, self.gamma)
-                for i, e_obs, e_next_obs in self._iter_env_idx_obs_next(q_states[0], next_obs):
+                for i, e_obs, e_next_obs in self._iter_env_idx_obs_next(
+                    q_states[0], next_obs
+                ):
                     # if anywhere in the trajectory we have ended episode flag,
                     # the last state will be None
                     ep_ended = any(map(lambda d: d[i], q_dones))
                     last_state = e_next_obs if not ep_ended else None
-                    results.append(ExperienceFirstLast(
-                        state=e_obs,
-                        action=q_actions[0][i],
-                        reward=rewards[i],
-                        last_state=last_state,
-                    ))
+                    results.append(
+                        ExperienceFirstLast(
+                            state=e_obs,
+                            action=q_actions[0][i],
+                            reward=rewards[i],
+                            last_state=last_state,
+                        )
+                    )
                 if self.unnest_data:
                     yield from results
                 else:
@@ -771,6 +786,7 @@ class TBMeanTracker:
 
     Designed and tested with pytorch-tensorboard in mind
     """
+
     def __init__(self, writer, batch_size):
         """
         :param writer: writer with close() and add_scalar() methods
@@ -790,7 +806,9 @@ class TBMeanTracker:
 
     @staticmethod
     def _as_float(value):
-        assert isinstance(value, (float, int, np.ndarray, np.generic, torch.autograd.Variable)) or torch.is_tensor(value)
+        assert isinstance(
+            value, (float, int, np.ndarray, np.generic, torch.autograd.Variable)
+        ) or torch.is_tensor(value)
         tensor_val = None
         if isinstance(value, torch.autograd.Variable):
             tensor_val = value.data
@@ -814,4 +832,3 @@ class TBMeanTracker:
         if len(data) >= self.batch_size:
             self.writer.add_scalar(param_name, np.mean(data), iter_index)
             data.clear()
-

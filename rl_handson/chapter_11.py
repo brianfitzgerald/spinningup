@@ -110,8 +110,10 @@ def main():
             reward = new_rewards[0]
             total_rewards.append(reward)
             mean_rewards = float(np.mean(total_rewards[-100:]))
-            logger.info(f"{step_idx}: reward: {reward:6.2f}, mean_100: {mean_rewards:6.2f}, "
-                  f"episodes: {done_episodes}")
+            logger.info(
+                f"{step_idx}: reward: {reward:6.2f}, mean_100: {mean_rewards:6.2f}, "
+                f"episodes: {done_episodes}"
+            )
             writer.add_scalar("reward", reward, step_idx)
             writer.add_scalar("reward_100", mean_rewards, step_idx)
             writer.add_scalar("episodes", done_episodes, step_idx)
@@ -121,7 +123,6 @@ def main():
 
         if batch_episodes < EPISODES_TO_TRAIN:
             continue
-
 
         optimizer.zero_grad()
         states_t = torch.as_tensor(np.asarray(batch_states))

@@ -113,9 +113,10 @@ class Agent:
                 for tgt_state, count in target_counts.items():
                     reward = self.rewards[(state, action, tgt_state)]
                     best_action = self.select_action(tgt_state)
-                    action_value += (count / total) * (reward + GAMMA * self.values[(tgt_state, best_action)])
+                    action_value += (count / total) * (
+                        reward + GAMMA * self.values[(tgt_state, best_action)]
+                    )
                 self.values[(state, action)] = action_value
-
 
 
 ENV_NAME = "FrozenLake-v1"

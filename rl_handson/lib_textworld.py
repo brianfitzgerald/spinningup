@@ -4,6 +4,7 @@ import typing as tt
 import warnings
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
+import torch.nn.functional as F
 
 import gymnasium as gym
 import textworld.gym.envs
@@ -19,6 +20,7 @@ from ptan import (
     EpisodeEvents,
     EpisodeFPSHandler,
     ExperienceFirstLast,
+    ExperienceReplayBuffer,
     PeriodEvents,
     PeriodicEvents,
 )
@@ -363,3 +365,25 @@ def unpack_batch(
             obs_ofs += 1
         prev_ofs = ofs
     return states, taken_commands, rewards, best_q
+
+
+def batch_generator(buffer: ExperienceReplayBuffer, initial: int, batch_size: int):
+    buffer.populate(initial)
+    while True:
+        buffer.populate(1)
+        yield buffer.sample(batch_size)
+
+
+def calc_loss_dqn(
+    batch, preprocessor, tgt_preprocessor, net, tgt_net, gamma, device="cpu"
+):
+    states, taken_commands, rewards, next_best_qs = unpack_batch(
+        batch, tgt_preprocessor, tgt_net, device
+    )
+
+    obs_t = preprocessor.encode_observations(states).to(device)
+    cmds_t = preprocessor.encode_commands(taken_commands).to(device)
+    q_values_t = net(obs_t, cmds_t)
+    tgt_q_t = torch.tensor(rewards) + gamma * torch.tensor(next_best_qs)
+    tgt_q_t = tgt_q_t.to(device)
+    return F.mse_loss(q_values_t.squeeze(-1), tgt_q_t)
