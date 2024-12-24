@@ -121,8 +121,8 @@ def main(
     device = get_device()
 
     game_files = ["games/%s%s.ulx" % (game, s) for s in range(1, suffixes + 1)]
-    val_game_file = f"games/{game}{validation}.ulx"
-    if not all(map(lambda p: Path(p).exists(), game_files)):
+    val_game_file = f"games/{game}-{validation}.ulx"
+    if not all(map(lambda p: Path(p).exists(), game_files + [val_game_file])):
         raise RuntimeError(
             f"Some game files from {game_files} " f"not found! Please run make_games.sh"
         )
@@ -174,7 +174,7 @@ def main(
     def process_batch(engine, batch):
         optimizer.zero_grad()
         loss_t = calc_loss_dqn(
-            batch, prep, prep, net, tgt_net.target_model, GAMMA, device=device
+            batch, prep, tgt_prep.target_model, net, tgt_net.target_model, GAMMA, device=device
         )
         loss_t.backward()
         optimizer.step()
@@ -182,6 +182,8 @@ def main(
         agent.epsilon = max(params.epsilon_final, eps)
         if engine.state.iteration % params.sync_nets == 0:
             tgt_net.sync()
+            tgt_prep.sync()
+
         return {
             "loss": loss_t.item(),
             "epsilon": agent.epsilon,
