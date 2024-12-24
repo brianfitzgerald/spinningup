@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
-import torch.utils.tensorboard as tb_logger
+from ignite.contrib.handlers import tensorboard_logger as tb_logger
 from gymnasium import spaces
 from gymnasium.core import WrapperActType, WrapperObsType
 from gymnasium.envs.registration import EnvSpec
@@ -97,7 +97,7 @@ class TextWorldPreproc(gym.Wrapper):
         self._copy_extra_fields = tuple(copy_extra_fields)
         self._use_admissible_commands = use_admissible_commands
         self._keep_admissible_commands = keep_admissible_commands
-        self._use_intermedate_reward = use_intermediate_reward
+        self._use_intermediate_reward = use_intermediate_reward
         self._num_fields = len(self._encode_extra_field) + int(self._encode_raw_text)
         self._last_admissible_commands = None
         self._last_extra_info = None
@@ -183,6 +183,8 @@ def setup_ignite(
     handler.attach(engine)
     EpisodeFPSHandler().attach(engine)
 
+    PeriodicEvents().attach(engine)
+
     @engine.on(EpisodeEvents.EPISODE_COMPLETED)
     def episode_completed(trainer: Engine):
         passed = trainer.state.metrics.get("time_passed", 0)
@@ -209,7 +211,7 @@ def setup_ignite(
 
     now = datetime.now().isoformat(timespec="minutes")
     logdir = f"runs/{now}-{run_name}"
-    tb = tb_logger.SummaryWriter(log_dir=logdir)
+    tb = tb_logger.TensorboardLogger(log_dir=logdir)
     run_avg = RunningAverage(output_transform=lambda v: v["loss"])
     run_avg.attach(engine, "avg_loss")
 

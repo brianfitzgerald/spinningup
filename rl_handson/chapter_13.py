@@ -35,6 +35,7 @@ from ptan import (
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
     PeriodEvents,
+    PeriodicEvents,
     TargetNet,
 )
 from textworld import EnvInfos
