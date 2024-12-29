@@ -3,7 +3,21 @@ DDPG - Deep Deterministic Policy Gradient
 Off policy actor-crtic method
 Deterministic policy gradient, which means it directly provies the action to take from the state
 Means we can apply the chain rule to the Q-value, and maximize the Q-value with respect to the policy parameters
+
 Actor gives the action to take for each state - N values, one for each action
+Critic gives the value of the state-action pair - aka Q-value
+Subsitute the Q-value into the Bellman equation, and get the loss function - Q(s, u(s)) where u(s) is the action from the actor
+Stochastic policy gradient is the same as the deterministic policy gradient, but with the addition of the entropy term
+In A2C, critic is used as the baseline, but in DDPG, the critic is used to train the actor
+Since the policy is deterministic, we can differentiate the Q-value with respect to the action, and use it to train the actor with SGD
+Use the Bellman equation to train the critic, and SGD for the actor
+The critic is updated similar to A2C, and actor is updated using the Q-value gradient, which maximizes the critic's output
+The method is off-policy, so we can use the replay buffer to store the experiences, and sample from it to train the network
+
+Since the policy is deterministic, we can't use the entropy term, so we use the Ornstein-Uhlenbeck process to add noise to the action
+Models the velocity of the Brownian motion, and adds it to the action, i.e. normal noise
+Critic has two paths - one for observation, and one for the action
+Actor is just observations -> actions
 """
 
 import math
@@ -32,116 +46,48 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from gymnasium.wrappers import RecordVideo
 
 
-class ModelA2C(nn.Module):
-    def __init__(self, obs_size: int, act_size: int, hid_size: int):
-        super(ModelA2C, self).__init__()
-
-        self.base = nn.Sequential(
-            nn.Linear(obs_size, hid_size),
-            nn.ReLU(),
-        )
-        self.mu = nn.Sequential(
-            nn.Linear(hid_size, act_size),
-            nn.Tanh(),
-        )
-        self.var = nn.Sequential(
-            nn.Linear(hid_size, act_size),
-            nn.Softplus(),
-        )
-        self.value = nn.Linear(hid_size, 1)
-
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # basic sequential layer
-        base_out = self.base(x)
-        # compute mean and variance, and value
-        return self.mu(base_out), self.var(base_out), self.value(base_out)
-
-
-class AgentA2C(BaseAgent):
-    def __init__(self, net: ModelA2C, device: torch.device):
-        self.net = net
-        self.device = device
-
-    def __call__(self, states: States, agent_states: AgentStates):
-        states_v = float32_preprocessor(states)
-        states_v = states_v.to(self.device)
-
-        # get the mean and variance of the action
-        mu_v, var_v, _ = self.net(states_v)
-        mu = mu_v.data.cpu().numpy()
-        # get the standard deviation
-        sigma = torch.sqrt(var_v).data.cpu().numpy()
-        # sample from the normal distribution
-        actions = np.random.normal(mu, sigma)
-        # clip the actions to be within the required range
-        actions = np.clip(actions, -1, 1)
-        return actions, agent_states
-
-
-def unpack_batch_a2c(batch, net, last_val_gamma, device="cpu"):
-    """
-    Convert batch into training tensors
-    :param batch:
-    :param net:
-    :return: states variable, actions tensor, reference values variable
-    """
-    states = []
-    actions = []
-    rewards = []
-    not_done_idx = []
-    last_states = []
-    for idx, exp in enumerate(batch):
-        states.append(exp.state)
-        actions.append(exp.action)
-        rewards.append(exp.reward)
-        if exp.last_state is not None:
-            not_done_idx.append(idx)
-            last_states.append(exp.last_state)
-    states_v = float32_preprocessor(states).to(device)
-    actions_v = torch.FloatTensor(np.asarray(actions)).to(device)
-
-    # handle rewards
-    rewards_np = np.array(rewards, dtype=np.float32)
-    if not_done_idx:
-        last_states_v = float32_preprocessor(last_states).to(device)
-        last_vals_v = net(last_states_v)[2]
-        last_vals_np = last_vals_v.data.cpu().numpy()[:, 0]
-        rewards_np[not_done_idx] += last_val_gamma * last_vals_np
-
-    ref_vals_v = torch.FloatTensor(rewards_np).to(device)
-    return states_v, actions_v, ref_vals_v
-
-
-def test_net(
-    net: ModelA2C,
-    env: gym.Env,
-    count: int = 10,
-    device: torch.device = torch.device("cpu"),
-):
-    rewards = 0.0
-    steps = 0
-    for _ in range(count):
-        obs, _ = env.reset()
-        while True:
-            obs_v = float32_preprocessor([obs])
-            obs_v = obs_v.to(device)
-            mu_v = net(obs_v)[0]
-            action = mu_v.squeeze(dim=0).data.cpu().numpy()
-            action = np.clip(action, -1, 1)
-            obs, reward, done, is_tr, _ = env.step(action)
-            rewards += reward  # type: ignore
-            steps += 1
-            if done or is_tr:
-                break
-    return rewards / count, steps / count
-
-
 ENV_IDS = {
     "cheetah": "HalfCheetah-v5",
     "ant": "Ant-v4",
 }
+
+
+class DDPGActor(nn.Module):
+    def __init__(self, obs_size: int, act_size: int):
+        super(DDPGActor, self).__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(obs_size, 400),
+            nn.ReLU(),
+            nn.Linear(400, 300),
+            nn.ReLU(),
+            nn.Linear(300, act_size),
+            nn.Tanh(),
+        )
+
+    def forward(self, x: torch.Tensor):
+        return self.net(x)
+
+
+class DDPGCritic(nn.Module):
+    def __init__(self, obs_size: int, act_size: int):
+        super(DDPGCritic, self).__init__()
+
+        self.obs_net = nn.Sequential(
+            nn.Linear(obs_size, 400),
+            nn.ReLU(),
+        )
+
+        self.out_net = nn.Sequential(
+            nn.Linear(400 + act_size, 300), nn.ReLU(), nn.Linear(300, 1)
+        )
+
+    def forward(self, x: torch.Tensor, a: torch.Tensor):
+        # a is the action, and x is the observation
+        obs = self.obs_net(x)
+        # Concatenate the observation and action, and pass it through the output network
+        # Return the Q-value, which is the value of the state-action pair
+        return self.out_net(torch.cat([obs, a], dim=1))
 
 
 GAMMA = 0.98

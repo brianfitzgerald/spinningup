@@ -9,27 +9,12 @@ https://gymnasium.farama.org/environments/mujoco/half_cheetah/
 
 import math
 import os
-import time
-import sys
 
 import fire
 import gymnasium as gym
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from lib import RewardTracker, ensure_directory, get_device
+from lib import ensure_directory, get_device
 from loguru import logger
-from ptan import (
-    AgentStates,
-    BaseAgent,
-    ExperienceSourceFirstLast,
-    States,
-    TBMeanTracker,
-    float32_preprocessor,
-)
-from torch.optim import Adam
-from torch.utils.tensorboard.writer import SummaryWriter
 from gymnasium.wrappers import RecordVideo
 
 ENV_IDS = {
