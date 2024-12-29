@@ -174,8 +174,8 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
     logger.info(f"Created {envs_count} {env_id} environments.")
 
     obs_size, act_size = (
-        envs[0].observation_space.shape[0],  # type: ignore
-        envs[0].action_space.shape[0],  # type: ignore
+        env.observation_space.shape[0],  # type: ignore
+        env.action_space.shape[0],  # type: ignore
     )
 
     net = ModelA2C(
