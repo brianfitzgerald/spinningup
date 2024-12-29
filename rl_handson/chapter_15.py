@@ -30,6 +30,7 @@ from ptan import (
 )
 from torch.optim import Adam
 from torch.utils.tensorboard.writer import SummaryWriter
+from gymnasium.wrappers import RecordVideo
 
 
 class ModelA2C(nn.Module):
@@ -144,13 +145,13 @@ ENV_IDS = {
 }
 
 
-GAMMA = 0.99
+GAMMA = 0.98
 REWARD_STEPS = 2
-BATCH_SIZE = 32
-LEARNING_RATE = 5e-5
+BATCH_SIZE = 64
+LEARNING_RATE = 2e-5
 ENTROPY_BETA = 1e-4
 
-TEST_ITERS = 1000
+TEST_ITERS = 100
 
 
 def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tensor):
@@ -163,13 +164,14 @@ def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tenso
 
 def main(env_id: str = "cheetah", envs_count: int = 1):
 
-    extra = {}
     device_name = get_device()
     device = torch.device(device_name)
 
     env_id = ENV_IDS[env_id]
 
-    env = gym.make(env_id, **extra)
+    ensure_directory("videos", clear=True)
+    env = gym.make(env_id, render_mode="rgb_array")
+    env = RecordVideo(env, os.path.join("videos", "a2c_" + env_id))
     test_env = gym.make(env_id)
     logger.info(f"Created {envs_count} {env_id} environments.")
 
