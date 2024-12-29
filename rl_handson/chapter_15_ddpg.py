@@ -1,10 +1,9 @@
 """
-Continuous action spaces
-Idea is to sample from a continuous action space for each parameter, instead of sampling probability of each action.
-Can apply A2C to continuous action spaces by using a Gaussian distribution to sample actions.
-Represent the policy as a Gaussian distribution with mean and standard deviation.
-So the network will output two values for each action, mean and standard deviation.
-https://gymnasium.farama.org/environments/mujoco/half_cheetah/
+DDPG - Deep Deterministic Policy Gradient
+Off policy actor-crtic method
+Deterministic policy gradient, which means it directly provies the action to take from the state
+Means we can apply the chain rule to the Q-value, and maximize the Q-value with respect to the policy parameters
+Actor gives the action to take for each state - N values, one for each action
 """
 
 import math

@@ -2,36 +2,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Chapter 15",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_15.py",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Chapter 13",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_13.py",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Chapter 12",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_12.py",
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "Chapter 11",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_11.py",
-            "console": "integratedTerminal",
-        },
-        {
             "name": "Chapter 7-9",
             "type": "debugpy",
             "request": "launch",
@@ -40,20 +10,6 @@
             "env": {
                 "CUDA_LAUNCH_BLOCKING": "1"
             }
-        },
-        {
-            "name": "Chapter 6",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_6.py",
-            "console": "integratedTerminal",
-        },
-        {
-            "name": "PPO: run",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "ppo/main.py",
-            "console": "integratedTerminal"
         },
         {
             "name": "Chapter 4",
@@ -66,12 +22,5 @@
                 "frozenlake"
             ]
         },
-        {
-            "name": "Chapter 5",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_5.py",
-            "console": "integratedTerminal",
-        }
     ]
 }
