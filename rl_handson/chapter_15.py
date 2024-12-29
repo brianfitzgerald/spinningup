@@ -7,15 +7,29 @@ So the network will output two values for each action, mean and standard deviati
 https://gymnasium.farama.org/environments/mujoco/half_cheetah/
 """
 
-import gymnasium as gym
-import fire
-from loguru import logger
-import torch.nn as nn
-import torch
-from ptan import BaseAgent, States, AgentStates, float32_preprocessor
-import numpy as np
+import math
+import os
+import time
+import sys
 
-from lib import get_device
+import fire
+import gymnasium as gym
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from lib import RewardTracker, get_device
+from loguru import logger
+from ptan import (
+    AgentStates,
+    BaseAgent,
+    ExperienceSourceFirstLast,
+    States,
+    TBMeanTracker,
+    float32_preprocessor,
+)
+from torch.optim import Adam
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 class ModelA2C(nn.Module):
@@ -36,7 +50,9 @@ class ModelA2C(nn.Module):
         )
         self.value = nn.Linear(hid_size, 1)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # basic sequential layer
         base_out = self.base(x)
         # compute mean and variance, and value
@@ -64,6 +80,64 @@ class AgentA2C(BaseAgent):
         return actions, agent_states
 
 
+def unpack_batch_a2c(batch, net, last_val_gamma, device="cpu"):
+    """
+    Convert batch into training tensors
+    :param batch:
+    :param net:
+    :return: states variable, actions tensor, reference values variable
+    """
+    states = []
+    actions = []
+    rewards = []
+    not_done_idx = []
+    last_states = []
+    for idx, exp in enumerate(batch):
+        states.append(exp.state)
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        if exp.last_state is not None:
+            not_done_idx.append(idx)
+            last_states.append(exp.last_state)
+    states_v = float32_preprocessor(states).to(device)
+    actions_v = torch.FloatTensor(np.asarray(actions)).to(device)
+
+    # handle rewards
+    rewards_np = np.array(rewards, dtype=np.float32)
+    if not_done_idx:
+        last_states_v = float32_preprocessor(last_states).to(device)
+        last_vals_v = net(last_states_v)[2]
+        last_vals_np = last_vals_v.data.cpu().numpy()[:, 0]
+        rewards_np[not_done_idx] += last_val_gamma * last_vals_np
+
+    ref_vals_v = torch.FloatTensor(rewards_np).to(device)
+    return states_v, actions_v, ref_vals_v
+
+
+def test_net(
+    net: ModelA2C,
+    env: gym.Env,
+    count: int = 10,
+    device: torch.device = torch.device("cpu"),
+):
+    rewards = 0.0
+    steps = 0
+    for _ in range(count):
+        obs, _ = env.reset()
+        while True:
+            obs_v = float32_preprocessor([obs])
+            obs_v = obs_v.to(device)
+            mu_v = net(obs_v)[0]
+            action = mu_v.squeeze(dim=0).data.cpu().numpy()
+            action = np.clip(action, -1, 1)
+            obs, reward, done, is_tr, _ = env.step(action)
+            rewards += reward  # type: ignore
+            steps += 1
+            if done or is_tr:
+                break
+    return rewards / count, steps / count
+
+
 ENV_IDS = {
     "cheetah": "HalfCheetah-v5",
     "ant": "Ant-v4",
@@ -71,25 +145,32 @@ ENV_IDS = {
 
 
 GAMMA = 0.99
-REWARD_STEPS = 5
+REWARD_STEPS = 2
 BATCH_SIZE = 32
-LEARNING_RATE_ACTOR = 1e-5
-LEARNING_RATE_CRITIC = 1e-3
-ENTROPY_BETA = 1e-3
-ENVS_COUNT = 16
+LEARNING_RATE = 5e-5
+ENTROPY_BETA = 1e-4
 
-TEST_ITERS = 100000
+TEST_ITERS = 1000
+
+
+def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tensor):
+    # differential entropy of the normal distribution
+    p1 = -((mu_v - actions_v) ** 2) / (2 * var_v.clamp(min=1e-3))
+    # sample from the normal distribution
+    p2 = -torch.log(torch.sqrt(2 * math.pi * var_v))
+    return p1 + p2
 
 
 def main(env_id: str = "cheetah", envs_count: int = 1):
 
     extra = {}
-    device = get_device()
+    device_name = get_device()
+    device = torch.device(device_name)
 
     env_id = ENV_IDS[env_id]
 
-    envs = [gym.make(env_id, **extra) for _ in range(envs_count)]
-    test_env = gym.make(env_id, **extra)
+    env = gym.make(env_id, **extra)
+    test_env = gym.make(env_id)
     logger.info(f"Created {envs_count} {env_id} environments.")
 
     obs_size, act_size = (
@@ -97,11 +178,80 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
         envs[0].action_space.shape[0],  # type: ignore
     )
 
-    model = ModelA2C(
+    net = ModelA2C(
         obs_size=obs_size,
         act_size=act_size,
         hid_size=64,
     ).to(device)
+
+    writer = SummaryWriter(comment=f"-a2c_{env_id}")
+    agent = AgentA2C(net, device=device)
+    exp_source = ExperienceSourceFirstLast(env, agent, GAMMA, steps_count=REWARD_STEPS)
+
+    optimizer = Adam(net.parameters(), lr=LEARNING_RATE)
+    save_path = os.path.join("saves", "a2c_" + env_id)
+
+    batch = []
+    best_reward = None
+    with RewardTracker(writer, sys.maxsize) as tracker:
+        with TBMeanTracker(writer, batch_size=10) as tb_tracker:
+            for step_idx, exp in enumerate(exp_source):
+                rewards_steps = exp_source.pop_rewards_steps()
+                if rewards_steps:
+                    rewards, steps = zip(*rewards_steps)
+                    tb_tracker.track("episode_steps", steps[0], step_idx)
+                    tracker.reward(rewards[0], step_idx)
+
+                if step_idx % TEST_ITERS == 0:
+                    ts = time.time()
+                    rewards, steps = test_net(net, test_env, device=device)
+                    print(
+                        "Test done is %.2f sec, reward %.3f, steps %d"
+                        % (time.time() - ts, rewards, steps)
+                    )
+                    writer.add_scalar("test_reward", rewards, step_idx)
+                    writer.add_scalar("test_steps", steps, step_idx)
+                    if best_reward is None or best_reward < rewards:
+                        if best_reward is not None:
+                            print(
+                                "Best reward updated: %.3f -> %.3f"
+                                % (best_reward, rewards)
+                            )
+                            name = "best_%+.3f_%d.dat" % (rewards, step_idx)
+                            fname = os.path.join(save_path, name)
+                            torch.save(net.state_dict(), fname)
+                        best_reward = rewards
+
+                batch.append(exp)
+                if len(batch) < BATCH_SIZE:
+                    continue
+
+                states_v, actions_v, vals_ref_v = unpack_batch_a2c(
+                    batch, net, device=device_name, last_val_gamma=GAMMA**REWARD_STEPS
+                )
+                batch.clear()
+
+                optimizer.zero_grad()
+                mu_v, var_v, value_v = net(states_v)
+
+                loss_value_v = F.mse_loss(value_v.squeeze(-1), vals_ref_v)
+                adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
+                log_prob_v = adv_v * calc_logprob(mu_v, var_v, actions_v)
+                loss_policy_v = -log_prob_v.mean()
+                ent_v = -(torch.log(2 * math.pi * var_v) + 1) / 2
+                entropy_loss_v = ENTROPY_BETA * ent_v.mean()
+
+                loss_v = loss_policy_v + entropy_loss_v + loss_value_v
+                loss_v.backward()
+                optimizer.step()
+
+                tb_tracker.track("advantage", adv_v, step_idx)
+                tb_tracker.track("values", value_v, step_idx)
+                tb_tracker.track("batch_rewards", vals_ref_v, step_idx)
+                tb_tracker.track("loss_entropy", entropy_loss_v, step_idx)
+                tb_tracker.track("loss_policy", loss_policy_v, step_idx)
+                tb_tracker.track("loss_value", loss_value_v, step_idx)
+                tb_tracker.track("loss_total", loss_v, step_idx)
 
 
 if __name__ == "__main__":
