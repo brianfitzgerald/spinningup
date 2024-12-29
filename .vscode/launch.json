@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Chapter 15",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rl_handson/chapter_15.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Chapter 13",
             "type": "debugpy",
             "request": "launch",
