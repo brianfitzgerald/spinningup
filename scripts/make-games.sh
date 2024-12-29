@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+mkdir -p games
 tw-make custom --world-size 5 --nb-objects 10 --quest-length 5  --quest-breadth 1 --seed 0 --output games/simple-val.ulx
 
 # change the range to generate more games

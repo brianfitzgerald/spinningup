@@ -13,6 +13,8 @@ import itertools
 import typing as tt
 from pathlib import Path
 from types import SimpleNamespace
+import tensorboard
+from loguru import logger
 
 import fire
 import numpy as np
@@ -27,7 +29,7 @@ from lib_textworld import (
     calc_loss_dqn,
     setup_ignite,
     Preprocessor,
-    DQNAgent
+    DQNAgent,
 )
 from models import DQNConvNet, DQNLinear
 from ptan import (
@@ -116,7 +118,7 @@ def main(
     game: str = "simple",
     suffixes: int = 20,
     validation: str = "val",
-    run_name: str = "run",
+    run_name: str = "textworld",
 ):
     device = get_device()
 
@@ -135,16 +137,16 @@ def main(
     env_id = register_games(
         gamefiles=game_files, request_infos=EnvInfos(**EXTRA_GAME_INFO), name=game
     )
-    print(f"Registered env {env_id} for game files {game_files}")
+    logger.info(f"Registered env {env_id} for game files {game_files}")
     val_env_id = register_games(
         gamefiles=[val_game_file], request_infos=EnvInfos(**EXTRA_GAME_INFO), name=game
     )
-    print(
+    logger.info(
         f"Game {val_env_id}, with file {val_game_file} " f"will be used for validation"
     )
     env = gym.make(env_id)
     env = TextWorldPreproc(env, vocab_rev)
-    v = env.reset()
+    env.reset()
 
     val_env = gym.make(val_env_id)
     val_env = TextWorldPreproc(val_env, vocab_rev)
@@ -174,7 +176,13 @@ def main(
     def process_batch(engine, batch):
         optimizer.zero_grad()
         loss_t = calc_loss_dqn(
-            batch, prep, tgt_prep.target_model, net, tgt_net.target_model, GAMMA, device=device
+            batch,
+            prep,
+            tgt_prep.target_model,
+            net,
+            tgt_net.target_model,
+            GAMMA,
+            device=device,
         )
         loss_t.backward()
         optimizer.step()
@@ -190,7 +198,7 @@ def main(
         }
 
     engine = Engine(process_batch)
-    run_name = f"tr-{params}_{run_name}"
+    run_name = f"tr-{game}_{run_name}"
     save_path = Path("saves") / run_name
     save_path.mkdir(parents=True, exist_ok=True)
 
@@ -218,12 +226,12 @@ def main(
                 break
         engine.state.metrics["val_reward"] = reward
         engine.state.metrics["val_steps"] = steps
-        print("Validation got %.3f reward in %d steps" % (reward, steps))
+        logger.info("Validation got %.3f reward in %d steps" % (reward, steps))
         best_val_reward = getattr(engine.state, "best_val_reward", None)
         if best_val_reward is None:
             engine.state.best_val_reward = reward
         elif best_val_reward < reward:
-            print(
+            logger.info(
                 "Best validation reward updated: %s -> %s" % (best_val_reward, reward)
             )
             save_net_name = save_path / ("best_val_%.3f_n.dat" % reward)
@@ -236,7 +244,7 @@ def main(
         if reward > 0:
             save_net_name = save_path / ("best_train_%.3f_n.dat" % reward)
             torch.save(net.state_dict(), save_net_name)
-            print(
+            logger.info(
                 "%d: best avg training reward: %.3f, saved"
                 % (trainer.state.iteration, reward)
             )

@@ -5,6 +5,7 @@ import warnings
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 import numpy as np
+from loguru import logger
 
 import gymnasium as gym
 import torch
@@ -190,7 +191,7 @@ def setup_ignite(
         passed = trainer.state.metrics.get("time_passed", 0)
         avg_steps = trainer.state.metrics.get("avg_steps", 50)
         avg_reward = trainer.state.metrics.get("avg_reward", 0.0)
-        print(
+        logger.info(
             "Episode %d: reward=%.0f (avg %.2f), "
             "steps=%s (avg %.2f), speed=%.1f f/s, "
             "elapsed=%s"

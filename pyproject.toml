@@ -5,7 +5,6 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "spinup"
 version = "0.1"                        # Replace with the appropriate version from your version.py file
-authors = [{ name = "Joshua Achiam" }]
 requires-python = ">=3.11"
 
 dependencies = [
