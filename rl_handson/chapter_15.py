@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lib import RewardTracker, get_device
+from lib import RewardTracker, ensure_directory, get_device
 from loguru import logger
 from ptan import (
     AgentStates,
@@ -219,6 +219,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
                             )
                             name = "best_%+.3f_%d.dat" % (rewards, step_idx)
                             fname = os.path.join(save_path, name)
+                            ensure_directory(save_path)
                             torch.save(net.state_dict(), fname)
                         best_reward = rewards
 
