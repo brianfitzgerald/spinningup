@@ -237,11 +237,15 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
                 optimizer.zero_grad()
                 mu_v, var_v, value_v = net(states_v)
 
+                # Value loss
                 loss_value_v = F.mse_loss(value_v.squeeze(-1), vals_ref_v)
+                # Advantage loss
                 adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
+                # Policy loss
                 log_prob_v = adv_v * calc_logprob(mu_v, var_v, actions_v)
                 loss_policy_v = -log_prob_v.mean()
                 ent_v = -(torch.log(2 * math.pi * var_v) + 1) / 2
+                # Entropy loss
                 entropy_loss_v = ENTROPY_BETA * ent_v.mean()
 
                 loss_v = loss_policy_v + entropy_loss_v + loss_value_v
