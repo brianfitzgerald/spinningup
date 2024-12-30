@@ -194,7 +194,7 @@ class DQNAgent(NNAgent):
 
 @dataclass(frozen=True)
 class Experience:
-    state: State
+    state: StateType
     action: Action
     reward: float
     done_trunc: bool
@@ -332,7 +332,7 @@ class ExperienceSourceFirstLast(ExperienceSource):
 
     def __init__(
         self,
-        env: gym.Env,
+        env: gym.Env | tt.Collection[gym.Env],
         agent: BaseAgent,
         gamma: float,
         steps_count: int = 1,

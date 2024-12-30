@@ -3,6 +3,7 @@ import math
 import os
 import time
 
+import fire
 import gymnasium as gym
 import numpy as np
 import ptan
@@ -11,8 +12,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard.writer import SummaryWriter
 import torch.nn as nn
-from lib import MUJOCO_ENV_IDS, RewardTracker, get_device
+from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
 from typing import List
+from gymnasium.wrappers import RecordVideo
 
 from ptan import (
     AgentStates,
@@ -145,18 +147,25 @@ def unpack_batch_a2c(
     ref_vals_v = torch.FloatTensor(rewards_np).to(device)
     return states_v, actions_v, ref_vals_v
 
+def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Tensor):
+    p1 = - ((mu_v - actions_v) ** 2) / (2*torch.exp(logstd_v).clamp(min=1e-3))
+    p2 = - torch.log(torch.sqrt(2 * math.pi * torch.exp(logstd_v)))
+    return p1 + p2
 
-def main(env_id: str = "half-cheetah", name: str = "a2c", save_path: str = "saves"):
+
+def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
     env_id = MUJOCO_ENV_IDS[env_id]
     envs = [gym.make(env_id) for _ in range(ENVS_COUNT)]
-    test_env = gym.make(env_id)
+    test_env = gym.make(env_id, render_mode="rgb_array")
+    ensure_directory(save_path)
+    test_env = RecordVideo(test_env, os.path.join("videos", f"{name}-{env_id}"), step_trigger=lambda x: True)
 
     device_str = get_device()
     device = torch.device(device_str)
 
     obs_size, act_size = (
-        env.observation_space.shape[0],  # type: ignore
-        env.action_space.shape[0],  # type: ignore
+        envs[0].observation_space.shape[0],  # type: ignore
+        envs[0].action_space.shape[0],  # type: ignore
     )
 
     net_act = ModelActor(obs_size, act_size).to(device)
@@ -222,7 +231,7 @@ def main(env_id: str = "half-cheetah", name: str = "a2c", save_path: str = "save
                 opt_act.zero_grad()
                 mu_v = net_act(states_v)
                 adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
-                log_prob_v = adv_v * model.calc_logprob(mu_v, net_act.logstd, actions_v)
+                log_prob_v = adv_v * calc_logprob(mu_v, net_act.logstd, actions_v)
                 loss_policy_v = -log_prob_v.mean()
                 entropy_loss_v = (
                     ENTROPY_BETA
@@ -241,3 +250,6 @@ def main(env_id: str = "half-cheetah", name: str = "a2c", save_path: str = "save
                 tb_tracker.track("loss_policy", loss_policy_v, step_idx)
                 tb_tracker.track("loss_value", loss_value_v, step_idx)
                 tb_tracker.track("loss_total", loss_v, step_idx)
+
+if __name__ == "__main__":
+    fire.Fire(main)
