@@ -13,7 +13,7 @@ import torch.optim as optim
 from torch.utils.tensorboard.writer import SummaryWriter
 import torch.nn as nn
 from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
-from typing import List, Optional
+from typing import List, Literal, Optional
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from tqdm import tqdm
 from loguru import logger
@@ -26,28 +26,17 @@ from ptan import (
     float32_preprocessor,
 )
 
-GAMMA = 0.99
-REWARD_STEPS = 5
-BATCH_SIZE = 32
-LEARNING_RATE_ACTOR = 1e-5
-LEARNING_RATE_CRITIC = 1e-3
-ENTROPY_BETA = 1e-3
-ENVS_COUNT = 16
-HID_SIZE = 64
-
-TEST_ITERS = 100000
-
 
 class ModelActor(nn.Module):
-    def __init__(self, obs_size: int, act_size: int):
+    def __init__(self, obs_size: int, act_size: int, hidden_size: int = 64):
         super(ModelActor, self).__init__()
 
         self.mu = nn.Sequential(
-            nn.Linear(obs_size, HID_SIZE),
+            nn.Linear(obs_size, hidden_size),
             nn.Tanh(),
-            nn.Linear(HID_SIZE, HID_SIZE),
+            nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
-            nn.Linear(HID_SIZE, act_size),
+            nn.Linear(hidden_size, act_size),
             nn.Tanh(),
         )
         self.logstd = nn.Parameter(torch.zeros(act_size))
@@ -57,15 +46,15 @@ class ModelActor(nn.Module):
 
 
 class ModelCritic(nn.Module):
-    def __init__(self, obs_size: int):
+    def __init__(self, obs_size: int, hidden_size: int = 64):
         super(ModelCritic, self).__init__()
 
         self.value = nn.Sequential(
-            nn.Linear(obs_size, HID_SIZE),
+            nn.Linear(obs_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(HID_SIZE, HID_SIZE),
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(HID_SIZE, 1),
+            nn.Linear(hidden_size, 1),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -158,20 +147,46 @@ def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Te
     return p1 + p2
 
 
+AlgorithmChoice = Literal["a2c", "ppo"]
+
 def main(
     env_id: str = "cheetah",
     name: str = "a2c",
     save_path: str = "saves",
     checkpoint: Optional[str] = None,
+    envs_count: int = 10,
+    algorithm: AlgorithmChoice = "a2c",
 ):
     env_id = MUJOCO_ENV_IDS[env_id]
-    envs = [gym.make(env_id) for _ in range(ENVS_COUNT)]
+    envs = [gym.make(env_id) for _ in range(envs_count)]
     test_env = gym.make(env_id, render_mode="rgb_array")
     ensure_directory(save_path, True)
     video_path = os.path.join("videos", f"{name}-{env_id}")
     ensure_directory(video_path, True)
     test_env = RecordVideo(test_env, video_path)
     test_env = TimeLimit(test_env, max_episode_steps=1000)
+
+    GAMMA = 0.99
+    REWARD_STEPS = 5
+    BATCH_SIZE = 32
+    TEST_ITERS = 100000
+
+    if algorithm == "a2c":
+        LEARNING_RATE_ACTOR = 1e-5
+        LEARNING_RATE_CRITIC = 1e-3
+    else:
+        LEARNING_RATE_ACTOR = 1e-5
+        LEARNING_RATE_CRITIC = 1e-4
+
+    # only used for A2C
+    ENTROPY_BETA = 1e-3
+
+    # only used for PPO
+    TRAJECTORY_SIZE = 2049
+    PPO_EPS = 0.2
+    PPO_EPOCHS = 10
+    PPO_BATCH_SIZE = 64
+    GAE_LAMBDA = 0.95
 
     device_str = get_device()
     device = torch.device(device_str)
