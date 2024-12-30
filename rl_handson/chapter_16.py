@@ -1,4 +1,22 @@
-#!/usr/bin/env python3
+"""
+Establish baseline with A2C
+Then implement PPO
+
+PPO - instead of using the gradient of the log probability of the action, we use the ratio of the new policy to the old policy, scaled by the advantage
+
+In math form, A2C gradient is E[log(pi(a|s)) * A(s, a)]
+PPO gradient is E[pi_new(a|s) / pi_old(a|s) * A(s, a)]
+Similar to cross entropy loss, this represents importance sampling
+However, if we just blindly update teh value with this, it can lead to large updates
+To prevent this, we clip the ratio to be within a certain range
+Specifically, take the minimum of the clipped ratio and the unclipped ratio
+i.e. min(ratio, clip(ratio, 1 - epsilon, 1 + epsilon))
+so if the unclipped value is lower, use that; otherwise, use the clipped value
+PPO also uses a more general advantage estimate, called GAE (Generalized Advantage Estimation)
+the equation is A(s, a) = delta_t + gamma * lambda * delta_t+1 + gamma^2 * lambda^2 * delta_t+2 + ...
+i.e. the advantage is the sum of the discounted rewards, but with a lambda factor that decreases the importance of future rewards
+"""
+
 import math
 import os
 import time
@@ -149,9 +167,9 @@ def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Te
 
 AlgorithmChoice = Literal["a2c", "ppo"]
 
+
 def main(
     env_id: str = "cheetah",
-    name: str = "a2c",
     save_path: str = "saves",
     checkpoint: Optional[str] = None,
     envs_count: int = 10,
@@ -161,7 +179,7 @@ def main(
     envs = [gym.make(env_id) for _ in range(envs_count)]
     test_env = gym.make(env_id, render_mode="rgb_array")
     ensure_directory(save_path, True)
-    video_path = os.path.join("videos", f"{name}-{env_id}")
+    video_path = os.path.join("videos", f"{algorithm}-{env_id}")
     ensure_directory(video_path, True)
     test_env = RecordVideo(test_env, video_path)
     test_env = TimeLimit(test_env, max_episode_steps=1000)
@@ -201,7 +219,7 @@ def main(
     logger.info(net_act)
     logger.info(net_crt)
 
-    writer = SummaryWriter(comment="-a2c_" + name)
+    writer = SummaryWriter(comment=f"-{algorithm}-{env_id}")
     agent = AgentA2C(net_act, device=device)
     exp_source = ptan.ExperienceSourceFirstLast(
         envs, agent, GAMMA, steps_count=REWARD_STEPS
@@ -241,7 +259,7 @@ def main(
                                 "Best reward updated: %.3f -> %.3f"
                                 % (best_reward, rewards)
                             )
-                            name = "best_%+.3f_%d.dat" % (rewards, step_idx)
+                            name = f"{algorithm}-best_{rewards:.0f}.dat"
                             fname = os.path.join(save_path, name)
                             torch.save(net_act.state_dict(), fname)
                         best_reward = rewards
