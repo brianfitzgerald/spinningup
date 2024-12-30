@@ -13,14 +13,9 @@ import os
 import fire
 import gymnasium as gym
 import torch
-from lib import ensure_directory, get_device
+from lib import MUJOCO_ENV_IDS, ensure_directory, get_device
 from loguru import logger
 from gymnasium.wrappers import RecordVideo
-
-ENV_IDS = {
-    "cheetah": "HalfCheetah-v5",
-    "ant": "Ant-v4",
-}
 
 
 def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tensor):
@@ -36,7 +31,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
     device_name = get_device()
     device = torch.device(device_name)
 
-    env_id = ENV_IDS[env_id]
+    env_id = MUJOCO_ENV_IDS[env_id]
 
     ensure_directory("videos", clear=True)
     env = gym.make(env_id, render_mode="rgb_array")

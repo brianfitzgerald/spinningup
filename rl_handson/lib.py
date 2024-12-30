@@ -1,4 +1,5 @@
 import shutil
+import sys
 import time
 from collections import deque
 from pathlib import Path
@@ -366,7 +367,7 @@ def get_device() -> str:
 
 
 class RewardTracker:
-    def __init__(self, writer: SummaryWriter, stop_reward):
+    def __init__(self, writer: SummaryWriter, stop_reward = sys.maxsize):
         self.writer = writer
         self.stop_reward = stop_reward
 
@@ -399,3 +400,9 @@ class RewardTracker:
             logger.info("Solved in %d frames!" % frame)
             return True
         return False
+
+
+MUJOCO_ENV_IDS = {
+    "cheetah": "HalfCheetah-v5",
+    "ant": "Ant-v4",
+}
