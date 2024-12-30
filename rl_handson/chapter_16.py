@@ -13,9 +13,10 @@ import torch.optim as optim
 from torch.utils.tensorboard.writer import SummaryWriter
 import torch.nn as nn
 from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
-from typing import List
+from typing import List, Optional
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from tqdm import tqdm
+from loguru import logger
 
 from ptan import (
     AgentStates,
@@ -92,7 +93,7 @@ class AgentA2C(BaseAgent):
 def test_net(
     net: ModelActor,
     env: gym.Env,
-    count: int = 10,
+    count: int = 2,
     device: torch.device = torch.device("cpu"),
 ):
     rewards = 0.0
@@ -115,12 +116,12 @@ def test_net(
     return rewards / count, steps / count
 
 
-
 def unpack_batch_a2c(
-        batch: List[ExperienceFirstLast],
-        net: ModelCritic,
-        last_val_gamma: float,
-        device: torch.device):
+    batch: List[ExperienceFirstLast],
+    net: ModelCritic,
+    last_val_gamma: float,
+    device: torch.device,
+):
     """
     Convert batch into training tensors
     """
@@ -150,19 +151,27 @@ def unpack_batch_a2c(
     ref_vals_v = torch.FloatTensor(rewards_np).to(device)
     return states_v, actions_v, ref_vals_v
 
+
 def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Tensor):
-    p1 = - ((mu_v - actions_v) ** 2) / (2*torch.exp(logstd_v).clamp(min=1e-3))
-    p2 = - torch.log(torch.sqrt(2 * math.pi * torch.exp(logstd_v)))
+    p1 = -((mu_v - actions_v) ** 2) / (2 * torch.exp(logstd_v).clamp(min=1e-3))
+    p2 = -torch.log(torch.sqrt(2 * math.pi * torch.exp(logstd_v)))
     return p1 + p2
 
 
-def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
+def main(
+    env_id: str = "cheetah",
+    name: str = "a2c",
+    save_path: str = "saves",
+    checkpoint: Optional[str] = None,
+):
     env_id = MUJOCO_ENV_IDS[env_id]
     envs = [gym.make(env_id) for _ in range(ENVS_COUNT)]
     test_env = gym.make(env_id, render_mode="rgb_array")
     ensure_directory(save_path, True)
-    test_env = RecordVideo(test_env, os.path.join("videos", f"{name}-{env_id}"))
-    test_env = TimeLimit(test_env, max_episode_steps=100)
+    video_path = os.path.join("videos", f"{name}-{env_id}")
+    ensure_directory(video_path, True)
+    test_env = RecordVideo(test_env, video_path)
+    test_env = TimeLimit(test_env, max_episode_steps=1000)
 
     device_str = get_device()
     device = torch.device(device_str)
@@ -174,14 +183,18 @@ def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
 
     net_act = ModelActor(obs_size, act_size).to(device)
     net_crt = ModelCritic(obs_size).to(device)
-    print(net_act)
-    print(net_crt)
+    logger.info(net_act)
+    logger.info(net_crt)
 
     writer = SummaryWriter(comment="-a2c_" + name)
     agent = AgentA2C(net_act, device=device)
     exp_source = ptan.ExperienceSourceFirstLast(
         envs, agent, GAMMA, steps_count=REWARD_STEPS
     )
+
+    if checkpoint:
+        net_act.load_state_dict(torch.load(checkpoint))
+        logger.info("Loaded from checkpoint %s" % checkpoint)
 
     opt_act = optim.Adam(net_act.parameters(), lr=LEARNING_RATE_ACTOR)
     opt_crt = optim.Adam(net_crt.parameters(), lr=LEARNING_RATE_CRITIC)
@@ -255,6 +268,7 @@ def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
                 tb_tracker.track("loss_policy", loss_policy_v, step_idx)
                 tb_tracker.track("loss_value", loss_value_v, step_idx)
                 tb_tracker.track("loss_total", loss_v, step_idx)
+
 
 if __name__ == "__main__":
     fire.Fire(main)
