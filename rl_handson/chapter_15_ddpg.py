@@ -36,9 +36,11 @@ from loguru import logger
 from ptan import (
     AgentStates,
     BaseAgent,
+    ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
     States,
     TBMeanTracker,
+    TargetNet,
     float32_preprocessor,
 )
 from torch.optim import Adam
@@ -90,21 +92,105 @@ class DDPGCritic(nn.Module):
         return self.out_net(torch.cat([obs, a], dim=1))
 
 
-GAMMA = 0.98
-REWARD_STEPS = 2
+class AgentDDPG(BaseAgent):
+    """
+    Agent implementing Orstein-Uhlenbeck exploration process
+    """
+
+    def __init__(
+        self,
+        net: DDPGActor,
+        device: torch.device = torch.device("cpu"),
+        ou_enabled: bool = True,
+        ou_mu: float = 0.0,
+        ou_teta: float = 0.15,
+        ou_sigma: float = 0.2,
+        ou_epsilon: float = 1.0,
+    ):
+        self.net = net
+        self.device = device
+        self.ou_enabled = ou_enabled
+        self.ou_mu = ou_mu
+        self.ou_teta = ou_teta
+        self.ou_sigma = ou_sigma
+        self.ou_epsilon = ou_epsilon
+
+    def initial_state(self):
+        return None
+
+    def __call__(self, states: States, agent_states: AgentStates):
+        states_v = float32_preprocessor(states)
+        states_v = states_v.to(self.device)
+        mu_v = self.net(states_v)
+        actions = mu_v.data.cpu().numpy()
+
+        if self.ou_enabled and self.ou_epsilon > 0:
+            new_a_states = []
+            for a_state, action in zip(agent_states, actions):
+                if a_state is None:
+                    a_state = np.zeros(shape=action.shape, dtype=np.float32)
+                # Add noise to the agent state
+                a_state += self.ou_teta * (self.ou_mu - a_state)
+                a_state += self.ou_sigma * np.random.normal(size=action.shape)
+
+                action += self.ou_epsilon * a_state
+                new_a_states.append(a_state)
+        else:
+            new_a_states = agent_states
+
+        actions = np.clip(actions, -1, 1)
+        return actions, new_a_states
+
+
+GAMMA = 0.99
 BATCH_SIZE = 64
-LEARNING_RATE = 2e-5
-ENTROPY_BETA = 1e-4
+LEARNING_RATE = 1e-4
+REPLAY_SIZE = 100000
+REPLAY_INITIAL = 10000
 
-TEST_ITERS = 100
+TEST_ITERS = 1000
 
 
-def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tensor):
-    # differential entropy of the normal distribution
-    p1 = -((mu_v - actions_v) ** 2) / (2 * var_v.clamp(min=1e-3))
-    # sample from the normal distribution
-    p2 = -torch.log(torch.sqrt(2 * math.pi * var_v))
-    return p1 + p2
+def test_net(
+    net: DDPGActor,
+    env: gym.Env,
+    count: int = 10,
+    device: torch.device = torch.device("cpu"),
+):
+    rewards = 0.0
+    steps = 0
+    for _ in range(count):
+        obs, _ = env.reset()
+        while True:
+            obs_v = float32_preprocessor([obs]).to(device)
+            mu_v = net(obs_v)
+            action = mu_v.squeeze(dim=0).data.cpu().numpy()
+            action = np.clip(action, -1, 1)
+            obs, reward, done, is_tr, _ = env.step(action)
+            rewards += reward  # type: ignore
+            steps += 1
+            if done or is_tr:
+                break
+    return rewards / count, steps / count
+
+
+def unpack_batch_ddqn(batch, device="cpu"):
+    states, actions, rewards, dones, last_states = [], [], [], [], []
+    for exp in batch:
+        states.append(exp.state)
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        dones.append(exp.last_state is None)
+        if exp.last_state is None:
+            last_states.append(exp.state)
+        else:
+            last_states.append(exp.last_state)
+    states_v = float32_preprocessor(states).to(device)
+    actions_v = float32_preprocessor(actions).to(device)
+    rewards_v = float32_preprocessor(rewards).to(device)
+    last_states_v = float32_preprocessor(last_states).to(device)
+    dones_t = torch.BoolTensor(dones).to(device)
+    return states_v, actions_v, rewards_v, dones_t, last_states_v
 
 
 def main(env_id: str = "cheetah", envs_count: int = 1):
@@ -116,7 +202,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
 
     ensure_directory("videos", clear=True)
     env = gym.make(env_id, render_mode="rgb_array")
-    env = RecordVideo(env, os.path.join("videos", "a2c_" + env_id))
+    env = RecordVideo(env, os.path.join("videos", "ddpg_" + env_id))
     test_env = gym.make(env_id)
     logger.info(f"Created {envs_count} {env_id} environments.")
 
@@ -124,86 +210,86 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
         env.observation_space.shape[0],  # type: ignore
         env.action_space.shape[0],  # type: ignore
     )
+    act_net = DDPGActor(obs_size, act_size).to(device)
+    crt_net = DDPGCritic(obs_size, act_size).to(device)
+    writer = SummaryWriter(comment=f"-ddpg_{env_id}")
+    agent = AgentDDPG(act_net, device=device)
+    exp_source = ExperienceSourceFirstLast(env, agent, gamma=GAMMA, steps_count=1)
 
-    net = ModelA2C(
-        obs_size=obs_size,
-        act_size=act_size,
-        hid_size=64,
-    ).to(device)
+    tgt_act_net = TargetNet(act_net)
+    tgt_crt_net = TargetNet(crt_net)
 
-    writer = SummaryWriter(comment=f"-a2c_{env_id}")
-    agent = AgentA2C(net, device=device)
-    exp_source = ExperienceSourceFirstLast(env, agent, GAMMA, steps_count=REWARD_STEPS)
+    save_path = os.path.join("saves", "ddpg_" + env_id)
 
-    optimizer = Adam(net.parameters(), lr=LEARNING_RATE)
-    save_path = os.path.join("saves", "a2c_" + env_id)
+    buffer = ExperienceReplayBuffer(exp_source, buffer_size=REPLAY_SIZE)
+    act_opt = Adam(act_net.parameters(), lr=LEARNING_RATE)
+    crt_opt = Adam(crt_net.parameters(), lr=LEARNING_RATE)
 
-    batch = []
+    frame_idx = 0
     best_reward = None
     with RewardTracker(writer, sys.maxsize) as tracker:
         with TBMeanTracker(writer, batch_size=10) as tb_tracker:
-            for step_idx, exp in enumerate(exp_source):
+            while True:
+                frame_idx += 1
+                buffer.populate(1)
                 rewards_steps = exp_source.pop_rewards_steps()
                 if rewards_steps:
                     rewards, steps = zip(*rewards_steps)
-                    tb_tracker.track("episode_steps", steps[0], step_idx)
-                    tracker.reward(rewards[0], step_idx)
+                    tb_tracker.track("episode_steps", steps[0], frame_idx)
+                    tracker.reward(rewards[0], frame_idx)
 
-                if step_idx % TEST_ITERS == 0:
+                if len(buffer) < REPLAY_INITIAL:
+                    continue
+
+                batch = buffer.sample(BATCH_SIZE)
+                states_v, actions_v, rewards_v, dones_mask, last_states_v = (
+                    unpack_batch_ddqn(batch, device_name)
+                )
+
+                # train critic
+                crt_opt.zero_grad()
+                q_v = crt_net(states_v, actions_v)
+                last_act_v = tgt_act_net.target_model(last_states_v)
+                q_last_v = tgt_crt_net.target_model(last_states_v, last_act_v)
+                q_last_v[dones_mask] = 0.0
+                q_ref_v = rewards_v.unsqueeze(dim=-1) + q_last_v * GAMMA
+                critic_loss_v = F.mse_loss(q_v, q_ref_v.detach())
+                critic_loss_v.backward()
+                crt_opt.step()
+                tb_tracker.track("loss_critic", critic_loss_v, frame_idx)
+                tb_tracker.track("critic_ref", q_ref_v.mean(), frame_idx)
+
+                # train actor
+                act_opt.zero_grad()
+                cur_actions_v = act_net(states_v)
+                actor_loss_v = -crt_net(states_v, cur_actions_v)
+                actor_loss_v = actor_loss_v.mean()
+                actor_loss_v.backward()
+                act_opt.step()
+                tb_tracker.track("loss_actor", actor_loss_v, frame_idx)
+
+                tgt_act_net.alpha_sync(alpha=1 - 1e-3)
+                tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
+
+                if frame_idx % TEST_ITERS == 0:
                     ts = time.time()
-                    rewards, steps = test_net(net, test_env, device=device)
+                    rewards, steps = test_net(act_net, test_env, device=device)
                     print(
-                        "Test done is %.2f sec, reward %.3f, steps %d"
+                        "Test done in %.2f sec, reward %.3f, steps %d"
                         % (time.time() - ts, rewards, steps)
                     )
-                    writer.add_scalar("test_reward", rewards, step_idx)
-                    writer.add_scalar("test_steps", steps, step_idx)
+                    writer.add_scalar("test_reward", rewards, frame_idx)
+                    writer.add_scalar("test_steps", steps, frame_idx)
                     if best_reward is None or best_reward < rewards:
                         if best_reward is not None:
                             print(
                                 "Best reward updated: %.3f -> %.3f"
                                 % (best_reward, rewards)
                             )
-                            name = "best_%+.3f_%d.dat" % (rewards, step_idx)
+                            name = "best_%+.3f_%d.dat" % (rewards, frame_idx)
                             fname = os.path.join(save_path, name)
-                            ensure_directory(save_path)
-                            torch.save(net.state_dict(), fname)
+                            torch.save(act_net.state_dict(), fname)
                         best_reward = rewards
-
-                batch.append(exp)
-                if len(batch) < BATCH_SIZE:
-                    continue
-
-                states_v, actions_v, vals_ref_v = unpack_batch_a2c(
-                    batch, net, device=device_name, last_val_gamma=GAMMA**REWARD_STEPS
-                )
-                batch.clear()
-
-                optimizer.zero_grad()
-                mu_v, var_v, value_v = net(states_v)
-
-                # Value loss
-                loss_value_v = F.mse_loss(value_v.squeeze(-1), vals_ref_v)
-                # Advantage loss
-                adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
-                # Policy loss
-                log_prob_v = adv_v * calc_logprob(mu_v, var_v, actions_v)
-                loss_policy_v = -log_prob_v.mean()
-                ent_v = -(torch.log(2 * math.pi * var_v) + 1) / 2
-                # Entropy loss
-                entropy_loss_v = ENTROPY_BETA * ent_v.mean()
-
-                loss_v = loss_policy_v + entropy_loss_v + loss_value_v
-                loss_v.backward()
-                optimizer.step()
-
-                tb_tracker.track("advantage", adv_v, step_idx)
-                tb_tracker.track("values", value_v, step_idx)
-                tb_tracker.track("batch_rewards", vals_ref_v, step_idx)
-                tb_tracker.track("loss_entropy", entropy_loss_v, step_idx)
-                tb_tracker.track("loss_policy", loss_policy_v, step_idx)
-                tb_tracker.track("loss_value", loss_value_v, step_idx)
-                tb_tracker.track("loss_total", loss_v, step_idx)
 
 
 if __name__ == "__main__":
