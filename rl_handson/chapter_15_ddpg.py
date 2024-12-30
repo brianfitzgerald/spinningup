@@ -93,6 +93,92 @@ class DDPGCritic(nn.Module):
         return self.out_net(torch.cat([obs, a], dim=1))
 
 
+Vmax = 10
+Vmin = -10
+N_ATOMS = 51
+DELTA_Z = (Vmax - Vmin) / (N_ATOMS - 1)
+
+def distr_projection(
+        next_distr: np.ndarray,
+        rewards: np.ndarray,
+        dones: np.ndarray,
+        gamma: float
+):
+    """
+    Perform distribution projection aka Catergorical Algorithm from the
+    "A Distributional Perspective on RL" paper
+    """
+    batch_size = len(rewards)
+    proj_distr = np.zeros((batch_size, N_ATOMS),
+                          dtype=np.float32)
+    delta_z = (Vmax - Vmin) / (N_ATOMS - 1)
+    for atom in range(N_ATOMS):
+        v = rewards + (Vmin + atom * delta_z) * gamma
+        tz_j = np.minimum(Vmax, np.maximum(Vmin, v))
+        b_j = (tz_j - Vmin) / delta_z
+        l = np.floor(b_j).astype(np.int64)
+        u = np.ceil(b_j).astype(np.int64)
+        eq_mask = u == l
+        proj_distr[eq_mask, l[eq_mask]] += \
+            next_distr[eq_mask, atom]
+        ne_mask = u != l
+        proj_distr[ne_mask, l[ne_mask]] += \
+            next_distr[ne_mask, atom] * (u - b_j)[ne_mask]
+        proj_distr[ne_mask, u[ne_mask]] += \
+            next_distr[ne_mask, atom] * (b_j - l)[ne_mask]
+    if dones.any():
+        proj_distr[dones] = 0.0
+        tz_j = np.minimum(
+            Vmax, np.maximum(Vmin, rewards[dones]))
+        b_j = (tz_j - Vmin) / delta_z
+        l = np.floor(b_j).astype(np.int64)
+        u = np.ceil(b_j).astype(np.int64)
+        eq_mask = u == l
+        eq_dones = dones.copy()
+        eq_dones[dones] = eq_mask
+        if eq_dones.any():
+            proj_distr[eq_dones, l[eq_mask]] = 1.0
+        ne_mask = u != l
+        ne_dones = dones.copy()
+        ne_dones[dones] = ne_mask
+        if ne_dones.any():
+            proj_distr[ne_dones, l[ne_mask]] = \
+                (u - b_j)[ne_mask]
+            proj_distr[ne_dones, u[ne_mask]] = \
+                (b_j - l)[ne_mask]
+    return proj_distr
+
+
+
+class D4PGCritic(nn.Module):
+    def __init__(
+        self, obs_size: int, act_size: int, n_atoms: int, v_min: float, v_max: float
+    ):
+        super(D4PGCritic, self).__init__()
+
+        self.obs_net = nn.Sequential(
+            nn.Linear(obs_size, 400),
+            nn.ReLU(),
+        )
+
+        self.out_net = nn.Sequential(
+            nn.Linear(400 + act_size, 300), nn.ReLU(), nn.Linear(300, n_atoms)
+        )
+
+        delta = (v_max - v_min) / (n_atoms - 1)
+        self.register_buffer("supports", torch.arange(v_min, v_max + delta, delta))
+
+    def forward(self, x: torch.Tensor, a: torch.Tensor):
+        obs = self.obs_net(x)
+        return self.out_net(torch.cat([obs, a], dim=1))
+
+    def distr_to_q(self, distr: torch.Tensor):
+        # Weighted sum of the supports
+        weights = F.softmax(distr, dim=1) * self.supports
+        res = weights.sum(dim=1)
+        return res.unsqueeze(dim=-1)
+
+
 class AgentDDPG(BaseAgent):
     """
     Agent implementing Orstein-Uhlenbeck exploration process
@@ -143,14 +229,6 @@ class AgentDDPG(BaseAgent):
         return actions, new_a_states
 
 
-GAMMA = 0.99
-BATCH_SIZE = 64
-LEARNING_RATE = 1e-4
-REPLAY_SIZE = 100000
-REPLAY_INITIAL = 10000
-
-TEST_ITERS = 100
-
 
 def test_net(
     net: DDPGActor,
@@ -195,12 +273,30 @@ def unpack_batch_ddqn(batch, device="cpu"):
 
 
 AlgorithmChoice = Literal["ddpg", "d4pg"]
-def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "ddpg"):
+
+
+def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "d4pg"):
 
     device_name = get_device()
     device = torch.device(device_name)
 
     env_id = ENV_IDS[env_id]
+
+    if algo == "ddpg":
+        GAMMA = 0.99
+        BATCH_SIZE = 64
+        LEARNING_RATE = 1e-4
+        REPLAY_SIZE = 100000
+        REPLAY_INITIAL = 10000
+    else:
+        GAMMA = 0.99
+        BATCH_SIZE = 64
+        LEARNING_RATE = 1e-4
+        REPLAY_SIZE = 100000
+        REPLAY_INITIAL = 10000
+        REWARD_STEPS = 5
+
+    TEST_ITERS = 100
 
     ensure_directory("videos", clear=True)
     env = gym.make(env_id, render_mode="rgb_array")
@@ -213,7 +309,10 @@ def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "
         env.action_space.shape[0],  # type: ignore
     )
     act_net = DDPGActor(obs_size, act_size).to(device)
-    crt_net = DDPGCritic(obs_size, act_size).to(device)
+    if algo == "d4pg":
+        crt_net = D4PGCritic(obs_size, act_size, 51, -500, 500).to(device)
+    else:
+        crt_net = DDPGCritic(obs_size, act_size).to(device)
     writer = SummaryWriter(comment=f"-ddpg_{env_id}")
     agent = AgentDDPG(act_net, device=device)
     exp_source = ExperienceSourceFirstLast(env, agent, gamma=GAMMA, steps_count=1)
@@ -248,6 +347,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "
                     unpack_batch_ddqn(batch, device_name)
                 )
 
+                # TODO add d4pg loss fn
                 # train critic
                 crt_opt.zero_grad()
                 q_v = crt_net(states_v, actions_v)
