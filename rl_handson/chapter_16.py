@@ -39,6 +39,7 @@ from loguru import logger
 from ptan import (
     AgentStates,
     BaseAgent,
+    Experience,
     ExperienceFirstLast,
     States,
     float32_preprocessor,
@@ -159,8 +160,62 @@ def unpack_batch_a2c(
     return states_v, actions_v, ref_vals_v
 
 
+def calc_adv_ref(
+    trajectory: List[Experience],
+    net_crt: nn.Module,
+    states_v: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+    device: str,
+):
+    """
+    By trajectory calculate advantage and 1-step ref value
+    :param trajectory: trajectory list
+    :param net_crt: critic network
+    :param states_v: states tensor
+    :return: tuple with advantage numpy array and reference values
+    """
+    values_v = net_crt(states_v)
+    values = values_v.squeeze().data.cpu().numpy()
+    # generalized advantage estimator: smoothed version of the advantage
+    last_gae = 0.0
+    result_adv = []
+    result_ref = []
+    for val, next_val, (exp,) in zip(
+        reversed(values[:-1]), reversed(values[1:]), reversed(trajectory[:-1])
+    ):
+        if exp.done_trunc:
+            delta = exp.reward - val
+            last_gae = delta
+        else:
+            delta = exp.reward + gamma * next_val - val
+            last_gae = delta + gamma * gae_lambda * last_gae
+        result_adv.append(last_gae)
+        result_ref.append(last_gae + val)
+
+    adv_v = torch.FloatTensor(np.asarray(list(reversed(result_adv))))
+    ref_v = torch.FloatTensor(np.asarray(list(reversed(result_ref))))
+    return adv_v.to(device), ref_v.to(device)
+
+
+def unpack_batch_ppo(
+    trajectory: List[ExperienceFirstLast],
+    device: str,
+):
+    traj_states = [t.state for t in trajectory]
+    traj_actions = [t.action for t in trajectory]
+    traj_states_v = torch.FloatTensor(np.asarray(traj_states))
+    traj_states_v = traj_states_v.to(device)
+    traj_actions_v = torch.FloatTensor(np.asarray(traj_actions))
+    traj_actions_v = traj_actions_v.to(device)
+    return traj_states_v, traj_actions_v
+
+
 def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Tensor):
+    # calculate the log of the probability of the action
+    # This is log(N(x|mu, sigma))
     p1 = -((mu_v - actions_v) ** 2) / (2 * torch.exp(logstd_v).clamp(min=1e-3))
+    # log of the square root of 2 * pi * sigma^2
     p2 = -torch.log(torch.sqrt(2 * math.pi * torch.exp(logstd_v)))
     return p1 + p2
 
@@ -182,7 +237,7 @@ def main(
     video_path = os.path.join("videos", f"{algorithm}-{env_id}")
     ensure_directory(video_path, True)
     test_env = RecordVideo(test_env, video_path)
-    test_env = TimeLimit(test_env, max_episode_steps=1000)
+    test_env = TimeLimit(test_env, max_episode_steps=10)
 
     GAMMA = 0.99
     REWARD_STEPS = 5
@@ -232,17 +287,20 @@ def main(
     opt_act = optim.Adam(net_act.parameters(), lr=LEARNING_RATE_ACTOR)
     opt_crt = optim.Adam(net_crt.parameters(), lr=LEARNING_RATE_CRITIC)
 
-    batch = []
+    trajectory = []
     best_reward = None
     with RewardTracker(writer) as tracker:
         with ptan.TBMeanTracker(writer, batch_size=100) as tb_tracker:
             for step_idx, exp in enumerate(exp_source):
+
+                # same between A2C and PPO
                 rewards_steps = exp_source.pop_rewards_steps()
                 if rewards_steps:
                     rewards, steps = zip(*rewards_steps)
                     tb_tracker.track("episode_steps", np.mean(steps), step_idx)
                     tracker.reward(np.mean(rewards), step_idx)
 
+                # same between A2C and PPO
                 if step_idx % TEST_ITERS == 0:
                     ts = time.time()
                     print("Test started")
@@ -264,43 +322,131 @@ def main(
                             torch.save(net_act.state_dict(), fname)
                         best_reward = rewards
 
-                batch.append(exp)
-                if len(batch) < BATCH_SIZE:
+                trajectory.append(exp)
+                if len(trajectory) < BATCH_SIZE:
                     continue
 
-                states_v, actions_v, vals_ref_v = unpack_batch_a2c(
-                    batch, net_crt, last_val_gamma=GAMMA**REWARD_STEPS, device=device
-                )
-                batch.clear()
+                if algorithm == "a2c":
+                    states_v, actions_v, vals_ref_v = unpack_batch_a2c(
+                        trajectory,
+                        net_crt,
+                        last_val_gamma=GAMMA**REWARD_STEPS,
+                        device=device,
+                    )
+                    trajectory.clear()
 
-                opt_crt.zero_grad()
-                value_v = net_crt(states_v)
-                loss_value_v = F.mse_loss(value_v.squeeze(-1), vals_ref_v)
-                loss_value_v.backward()
-                opt_crt.step()
+                    opt_crt.zero_grad()
+                    value_v = net_crt(states_v)
+                    loss_value_v = F.mse_loss(value_v.squeeze(-1), vals_ref_v)
+                    loss_value_v.backward()
+                    opt_crt.step()
 
-                opt_act.zero_grad()
-                mu_v = net_act(states_v)
-                adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
-                log_prob_v = adv_v * calc_logprob(mu_v, net_act.logstd, actions_v)
-                loss_policy_v = -log_prob_v.mean()
-                entropy_loss_v = (
-                    ENTROPY_BETA
-                    * (
-                        -(torch.log(2 * math.pi * torch.exp(net_act.logstd)) + 1) / 2
-                    ).mean()
-                )
-                loss_v = loss_policy_v + entropy_loss_v
-                loss_v.backward()
-                opt_act.step()
+                    opt_act.zero_grad()
+                    mu_v = net_act(states_v)
+                    # get advantage from critic
+                    adv_v = vals_ref_v.unsqueeze(dim=-1) - value_v.detach()
+                    # calculate log of mu/std, and multiply by advantage
+                    log_prob_v = adv_v * calc_logprob(mu_v, net_act.logstd, actions_v)
+                    loss_policy_v = -log_prob_v.mean()
+                    # Entropy loss
+                    entropy_loss_v = (
+                        ENTROPY_BETA
+                        * (
+                            -(torch.log(2 * math.pi * torch.exp(net_act.logstd)) + 1)
+                            / 2
+                        ).mean()
+                    )
+                    loss_v = loss_policy_v + entropy_loss_v
+                    loss_v.backward()
+                    opt_act.step()
 
-                tb_tracker.track("advantage", adv_v, step_idx)
-                tb_tracker.track("values", value_v, step_idx)
-                tb_tracker.track("batch_rewards", vals_ref_v, step_idx)
-                tb_tracker.track("loss_entropy", entropy_loss_v, step_idx)
-                tb_tracker.track("loss_policy", loss_policy_v, step_idx)
-                tb_tracker.track("loss_value", loss_value_v, step_idx)
-                tb_tracker.track("loss_total", loss_v, step_idx)
+                    tb_tracker.track("advantage", adv_v, step_idx)
+                    tb_tracker.track("values", value_v, step_idx)
+                    tb_tracker.track("batch_rewards", vals_ref_v, step_idx)
+                    tb_tracker.track("loss_entropy", entropy_loss_v, step_idx)
+                    tb_tracker.track("loss_policy", loss_policy_v, step_idx)
+                    tb_tracker.track("loss_value", loss_value_v, step_idx)
+                    tb_tracker.track("loss_total", loss_v, step_idx)
+                elif algorithm == "ppo":
+                    traj_states_v, traj_actions_v = unpack_batch_ppo(
+                        trajectory, device_str
+                    )
+                    traj_adv_v, traj_ref_v = calc_adv_ref(
+                        trajectory,
+                        net_crt,
+                        traj_states_v,
+                        GAMMA,
+                        GAE_LAMBDA,
+                        device_str,
+                    )
+                    mu_v = net_act(traj_states_v)
+                    old_logprob_v = calc_logprob(
+                        mu_v, net_act.logstd, traj_actions_v
+                    )
+
+                    # normalize advantages
+                    traj_adv_v = traj_adv_v - torch.mean(traj_adv_v)
+                    traj_adv_v /= torch.std(traj_adv_v)
+
+                    # drop last entry from the trajectory, an our adv and ref value calculated without it
+                    trajectory = trajectory[:-1]
+                    old_logprob_v = old_logprob_v[:-1].detach()
+
+                    sum_loss_value = 0.0
+                    sum_loss_policy = 0.0
+                    count_steps = 0
+
+                    for epoch in range(PPO_EPOCHS):
+                        for batch_ofs in range(0, len(trajectory), PPO_BATCH_SIZE):
+                            batch_l = batch_ofs + PPO_BATCH_SIZE
+                            states_v = traj_states_v[batch_ofs:batch_l]
+                            actions_v = traj_actions_v[batch_ofs:batch_l]
+                            batch_adv_v = traj_adv_v[batch_ofs:batch_l]
+                            batch_adv_v = batch_adv_v.unsqueeze(-1)
+                            batch_ref_v = traj_ref_v[batch_ofs:batch_l]
+                            batch_old_logprob_v = old_logprob_v[batch_ofs:batch_l]
+
+                            # critic training
+                            opt_crt.zero_grad()
+                            value_v = net_crt(states_v)
+                            # simply MSE loss between value_v and batch_ref_v
+                            loss_value_v = F.mse_loss(value_v.squeeze(-1), batch_ref_v)
+                            loss_value_v.backward()
+                            opt_crt.step()
+
+                            # actor training
+                            opt_act.zero_grad()
+                            mu_v = net_act(states_v)
+                            logprob_pi_v = calc_logprob(mu_v, net_act.logstd, actions_v)
+                            # get the ratio of the new policy to the old policy
+                            ratio_v = torch.exp(logprob_pi_v - batch_old_logprob_v)
+                            surr_obj_v = batch_adv_v * ratio_v
+
+                            # clipped ratio of the new policy to the old policy
+                            c_ratio_v = torch.clamp(
+                                ratio_v, 1.0 - PPO_EPS, 1.0 + PPO_EPS
+                            )
+                            # clipped surrogate objective - advantage * clipped ratio
+                            clipped_surr_v = batch_adv_v * c_ratio_v
+                            loss_policy_v = -torch.min(
+                                surr_obj_v, clipped_surr_v
+                            ).mean()
+                            loss_policy_v.backward()
+                            opt_act.step()
+
+                            sum_loss_value += loss_value_v.item()
+                            sum_loss_policy += loss_policy_v.item()
+                            count_steps += 1
+
+                    trajectory.clear()
+                    writer.add_scalar("advantage", traj_adv_v.mean().item(), step_idx)
+                    writer.add_scalar("values", traj_ref_v.mean().item(), step_idx)
+                    writer.add_scalar(
+                        "loss_policy", sum_loss_policy / count_steps, step_idx
+                    )
+                    writer.add_scalar(
+                        "loss_value", sum_loss_value / count_steps, step_idx
+                    )
 
 
 if __name__ == "__main__":

@@ -29,8 +29,10 @@
             "program": "rl_handson/chapter_16.py",
             "console": "integratedTerminal",
             "args": [
-                "--checkpoint",
-                "best_halfcheetah_ch16.dat"
+                // "--checkpoint",
+                // "best_halfcheetah_ch16.dat"
+                "--algorithm",
+                "ppo"
             ]
         },
     ]
