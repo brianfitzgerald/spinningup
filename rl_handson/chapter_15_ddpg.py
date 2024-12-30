@@ -24,6 +24,7 @@ import math
 import os
 import time
 import sys
+from typing import Literal
 
 import fire
 import gymnasium as gym
@@ -148,7 +149,7 @@ LEARNING_RATE = 1e-4
 REPLAY_SIZE = 100000
 REPLAY_INITIAL = 10000
 
-TEST_ITERS = 1000
+TEST_ITERS = 100
 
 
 def test_net(
@@ -193,7 +194,8 @@ def unpack_batch_ddqn(batch, device="cpu"):
     return states_v, actions_v, rewards_v, dones_t, last_states_v
 
 
-def main(env_id: str = "cheetah", envs_count: int = 1):
+AlgorithmChoice = Literal["ddpg", "d4pg"]
+def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "ddpg"):
 
     device_name = get_device()
     device = torch.device(device_name)
@@ -268,6 +270,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
                 act_opt.step()
                 tb_tracker.track("loss_actor", actor_loss_v, frame_idx)
 
+                # soft sync target networks
                 tgt_act_net.alpha_sync(alpha=1 - 1e-3)
                 tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
 
@@ -286,6 +289,7 @@ def main(env_id: str = "cheetah", envs_count: int = 1):
                                 "Best reward updated: %.3f -> %.3f"
                                 % (best_reward, rewards)
                             )
+                            ensure_directory(save_path)
                             name = "best_%+.3f_%d.dat" % (rewards, frame_idx)
                             fname = os.path.join(save_path, name)
                             torch.save(act_net.state_dict(), fname)
