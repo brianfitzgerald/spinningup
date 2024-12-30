@@ -14,7 +14,8 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import torch.nn as nn
 from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
 from typing import List
-from gymnasium.wrappers import RecordVideo
+from gymnasium.wrappers import RecordVideo, TimeLimit
+from tqdm import tqdm
 
 from ptan import (
     AgentStates,
@@ -96,7 +97,8 @@ def test_net(
 ):
     rewards = 0.0
     steps = 0
-    for _ in range(count):
+    iterator = tqdm(range(count))
+    for _ in iterator:
         obs, _ = env.reset()
         while True:
             obs_v = float32_preprocessor([obs])
@@ -107,6 +109,7 @@ def test_net(
             obs, reward, done, is_tr, _ = env.step(action)
             rewards += reward  # type: ignore
             steps += 1
+            iterator.set_postfix({"rewards": rewards, "steps": steps})
             if done or is_tr:
                 break
     return rewards / count, steps / count
@@ -157,8 +160,9 @@ def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
     env_id = MUJOCO_ENV_IDS[env_id]
     envs = [gym.make(env_id) for _ in range(ENVS_COUNT)]
     test_env = gym.make(env_id, render_mode="rgb_array")
-    ensure_directory(save_path)
-    test_env = RecordVideo(test_env, os.path.join("videos", f"{name}-{env_id}"), step_trigger=lambda x: True)
+    ensure_directory(save_path, True)
+    test_env = RecordVideo(test_env, os.path.join("videos", f"{name}-{env_id}"))
+    test_env = TimeLimit(test_env, max_episode_steps=100)
 
     device_str = get_device()
     device = torch.device(device_str)
@@ -195,6 +199,7 @@ def main(env_id: str = "cheetah", name: str = "a2c", save_path: str = "saves"):
 
                 if step_idx % TEST_ITERS == 0:
                     ts = time.time()
+                    print("Test started")
                     rewards, steps = test_net(net_act, test_env, device=device)
                     print(
                         "Test done in %.2f sec, reward %.3f, steps %d"
