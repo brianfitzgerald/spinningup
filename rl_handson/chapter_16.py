@@ -35,7 +35,7 @@ But if observations are hard to obtain, off-policy methods will do better
 import math
 import os
 import time
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Sequence
 
 import fire
 import gymnasium as gym
@@ -54,13 +54,19 @@ from ptan import (
     BaseAgent,
     Experience,
     ExperienceFirstLast,
+    ExperienceSource,
     States,
+    TBMeanTracker,
+    TargetNet,
     float32_preprocessor,
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
+from loguru import logger
+
+from models import ModelSACTwinQ
 
 
 class ModelActor(nn.Module):
@@ -142,8 +148,8 @@ def test_net(
 
 
 def unpack_batch_a2c(
-    batch: List[ExperienceFirstLast],
-    net: ModelCritic,
+    batch: Sequence[ExperienceFirstLast],
+    net: nn.Module,
     last_val_gamma: float,
     device: torch.device,
 ):
@@ -230,8 +236,8 @@ def unpack_batch_ppo(
 
 @torch.no_grad()
 def unpack_batch_sac(
-    batch: List[ExperienceFirstLast],
-    val_net: ModelCritic,
+    batch: Sequence[tuple[ExperienceFirstLast]],
+    val_net: nn.Module,
     twinq_net: nn.Module,
     policy_net: ModelActor,
     gamma: float,
@@ -241,7 +247,8 @@ def unpack_batch_sac(
     """
     Unpack Soft Actor-Critic batch
     """
-    states_v, actions_v, ref_q_v = unpack_batch_a2c(batch, val_net, gamma, device)
+    exp = [b[0] for b in batch]
+    states_v, actions_v, ref_q_v = unpack_batch_a2c(exp, val_net, gamma, device)
 
     # references for the critic network
     mu_v = policy_net(states_v)
@@ -269,13 +276,14 @@ AlgorithmChoice = Literal["a2c", "ppo", "sac"]
 
 
 def main(
-    env_id: str = "cheetah",
+    env_id: str = "ant",
     save_path: str = "saves",
     checkpoint: Optional[str] = None,
     envs_count: int = 10,
-    algorithm: AlgorithmChoice = "a2c",
+    algorithm: AlgorithmChoice = "sac",
 ):
     env_id = MUJOCO_ENV_IDS[env_id]
+    logger.info(f"Training {algorithm} on env {env_id}")
     envs = [gym.make(env_id) for _ in range(envs_count)]
     test_env = gym.make(env_id, render_mode="rgb_array")
     ensure_directory(save_path, True)
@@ -288,6 +296,7 @@ def main(
     REWARD_STEPS = 5
     BATCH_SIZE = 32
     TEST_ITERS = 100000
+    MEAN_TRACKER_BATCH_SIZE = 100
 
     if algorithm == "a2c":
         LEARNING_RATE_ACTOR = 1e-5
@@ -300,12 +309,14 @@ def main(
         BATCH_SIZE = 64
         LEARNING_RATE_ACTOR = 1e-4
         LEARNING_RATE_CRITIC = 1e-4
-        REPLAY_INITIAL = 10000
-        SAC_ENTROPY_ALPHA = 0.1
         TEST_ITERS = 10000
+        MEAN_TRACKER_BATCH_SIZE = 10
 
     # only used for SAC
     REPLAY_SIZE = 100000
+    REPLAY_INITIAL = 10000
+    SAC_ENTROPY_ALPHA = 0.1
+    LR_VALS = 1e-4
 
     # only used for A2C
     ENTROPY_BETA = 1e-3
@@ -343,12 +354,92 @@ def main(
     trajectory = []
     best_reward = None
 
-    buffer = ExperienceReplayBuffer(exp_source, buffer_size=REPLAY_SIZE)
-
+    frame_idx = 0
     with RewardTracker(writer) as tracker:
-        with ptan.TBMeanTracker(writer, batch_size=100) as tb_tracker:
-            if algorithm == "a2c":
-                pass
+        with TBMeanTracker(writer, batch_size=MEAN_TRACKER_BATCH_SIZE) as tb_tracker:
+            if algorithm == "sac":
+                twinq_net = ModelSACTwinQ(obs_size, act_size, 64).to(device)
+                twinq_opt = optim.Adam(twinq_net.parameters(), lr=LR_VALS)
+                tgt_crt_net = TargetNet(net_crt)
+                buffer = ExperienceReplayBuffer(exp_source, buffer_size=REPLAY_SIZE)
+                while True:
+                    frame_idx += 1
+                    buffer.populate(1)
+                    rewards_steps = exp_source.pop_rewards_steps()
+                    if rewards_steps:
+                        rewards, steps = zip(*rewards_steps)
+                        tb_tracker.track("episode_steps", steps[0], frame_idx)
+                        tracker.reward(rewards[0], frame_idx)
+
+                    if len(buffer) < REPLAY_INITIAL:
+                        continue
+
+                    batch: List[tuple[ExperienceFirstLast]] = buffer.sample(BATCH_SIZE)  # type: ignore
+                    states_v, actions_v, ref_vals_v, ref_q_v = unpack_batch_sac(
+                        batch,
+                        tgt_crt_net.target_model,
+                        twinq_net,
+                        net_act,
+                        GAMMA,
+                        SAC_ENTROPY_ALPHA,
+                        device,
+                    )
+
+                    tb_tracker.track("ref_v", ref_vals_v.mean(), frame_idx)
+                    tb_tracker.track("ref_q", ref_q_v.mean(), frame_idx)
+
+                    # train TwinQ
+                    twinq_opt.zero_grad()
+                    q1_v, q2_v = twinq_net(states_v, actions_v)
+                    q1_loss_v = F.mse_loss(q1_v.squeeze(), ref_q_v.detach())
+                    q2_loss_v = F.mse_loss(q2_v.squeeze(), ref_q_v.detach())
+                    q_loss_v = q1_loss_v + q2_loss_v
+                    q_loss_v.backward()
+                    twinq_opt.step()
+                    tb_tracker.track("loss_q1", q1_loss_v, frame_idx)
+                    tb_tracker.track("loss_q2", q2_loss_v, frame_idx)
+
+                    # Critic
+                    opt_crt.zero_grad()
+                    val_v = net_crt(states_v)
+                    v_loss_v = F.mse_loss(val_v.squeeze(), ref_vals_v.detach())
+                    v_loss_v.backward()
+                    opt_crt.step()
+                    tb_tracker.track("loss_v", v_loss_v, frame_idx)
+
+                    # Actor
+                    opt_act.zero_grad()
+                    acts_v = net_act(states_v)
+                    q_out_v, _ = twinq_net(states_v, acts_v)
+                    act_loss = -q_out_v.mean()
+                    act_loss.backward()
+                    opt_act.step()
+                    tb_tracker.track("loss_act", act_loss, frame_idx)
+
+                    tgt_crt_net.alpha_sync(alpha=1 - 1e-3)
+
+                    if frame_idx % TEST_ITERS == 0:
+                        ts = time.time()
+                        rewards, steps = test_net(
+                            net_act, test_env, device=device
+                        )
+                        print(
+                            "Test done in %.2f sec, reward %.3f, steps %d"
+                            % (time.time() - ts, rewards, steps)
+                        )
+                        writer.add_scalar("test_reward", rewards, frame_idx)
+                        writer.add_scalar("test_steps", steps, frame_idx)
+                        if best_reward is None or best_reward < rewards:
+                            if best_reward is not None:
+                                print(
+                                    "Best reward updated: %.3f -> %.3f"
+                                    % (best_reward, rewards)
+                                )
+                                name = "best_%+.3f_%d.dat" % (rewards, frame_idx)
+                                fname = os.path.join(save_path, name)
+                                torch.save(net_act.state_dict(), fname)
+                            best_reward = rewards
+
             else:
                 for step_idx, exp in enumerate(exp_source):
                     # same between A2C and PPO
@@ -517,6 +608,8 @@ def main(
                         writer.add_scalar(
                             "loss_value", sum_loss_value / count_steps, step_idx
                         )
+    for e in envs:
+        e.close()
 
 
 if __name__ == "__main__":
