@@ -15,27 +15,40 @@ so if the unclipped value is lower, use that; otherwise, use the clipped value
 PPO also uses a more general advantage estimate, called GAE (Generalized Advantage Estimation)
 the equation is A(s, a) = delta_t + gamma * lambda * delta_t+1 + gamma^2 * lambda^2 * delta_t+2 + ...
 i.e. the advantage is the sum of the discounted rewards, but with a lambda factor that decreases the importance of future rewards
+Skipping TRPO since it's complicated and not really used
+
+SAC - actor-critic with entropy regularization bonus
+Give the agent a bonus for exploration
+Policy is argmax of Q(s, a) + alpha * H(pi(s))
+Alpha is a hyperparameter that controls the importance of the entropy bonus
+Also uses clipped double-Q trick - use two Q networks, and take the minimum of the two
+This helps with dealing with Q-value over-estimatiomn during training
+Trained with MSE objective by doing Bellman approximation using the target value network
+
+Model actor - policy variance is not parameterized by the state - log_std is just at ensor, not a network - which in classical SAC isn't the case
+Critic is the same
+
+If an environment is fast and observeations are easy to obtain, on policy methods are a better choice
+But if observations are hard to obtain, off-policy methods will do better
 """
 
 import math
 import os
 import time
+from typing import List, Literal, Optional
 
 import fire
 import gymnasium as gym
 import numpy as np
 import ptan
 import torch
+import torch.distributions as distr
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard.writer import SummaryWriter
-import torch.nn as nn
-from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
-from typing import List, Literal, Optional
 from gymnasium.wrappers import RecordVideo, TimeLimit
-from tqdm import tqdm
+from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
 from loguru import logger
-
 from ptan import (
     AgentStates,
     BaseAgent,
@@ -44,6 +57,8 @@ from ptan import (
     States,
     float32_preprocessor,
 )
+from torch.utils.tensorboard.writer import SummaryWriter
+from tqdm import tqdm
 
 
 class ModelActor(nn.Module):
@@ -181,7 +196,7 @@ def calc_adv_ref(
     last_gae = 0.0
     result_adv = []
     result_ref = []
-    for val, next_val, (exp,) in zip(
+    for val, next_val, exp in zip(
         reversed(values[:-1]), reversed(values[1:]), reversed(trajectory[:-1])
     ):
         if exp.done_trunc:
@@ -211,6 +226,33 @@ def unpack_batch_ppo(
     return traj_states_v, traj_actions_v
 
 
+@torch.no_grad()
+def unpack_batch_sac(
+    batch: List[ExperienceFirstLast],
+    val_net: ModelCritic,
+    twinq_net: nn.Module,
+    policy_net: ModelActor,
+    gamma: float,
+    ent_alpha: float,
+    device: torch.device,
+):
+    """
+    Unpack Soft Actor-Critic batch
+    """
+    states_v, actions_v, ref_q_v = unpack_batch_a2c(batch, val_net, gamma, device)
+
+    # references for the critic network
+    mu_v = policy_net(states_v)
+    act_dist = distr.Normal(mu_v, torch.exp(policy_net.logstd))
+    acts_v = act_dist.sample()
+    q1_v, q2_v = twinq_net(states_v, acts_v)
+    # element-wise minimum
+    ref_vals_v = torch.min(q1_v, q2_v).squeeze() - ent_alpha * act_dist.log_prob(
+        acts_v
+    ).sum(dim=1)
+    return states_v, actions_v, ref_vals_v, ref_q_v
+
+
 def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Tensor):
     # calculate the log of the probability of the action
     # This is log(N(x|mu, sigma))
@@ -220,7 +262,7 @@ def calc_logprob(mu_v: torch.Tensor, logstd_v: torch.Tensor, actions_v: torch.Te
     return p1 + p2
 
 
-AlgorithmChoice = Literal["a2c", "ppo"]
+AlgorithmChoice = Literal["a2c", "ppo", "trpo"]
 
 
 def main(
@@ -255,7 +297,6 @@ def main(
     ENTROPY_BETA = 1e-3
 
     # only used for PPO
-    TRAJECTORY_SIZE = 2049
     PPO_EPS = 0.2
     PPO_EPOCHS = 10
     PPO_BATCH_SIZE = 64
@@ -292,7 +333,6 @@ def main(
     with RewardTracker(writer) as tracker:
         with ptan.TBMeanTracker(writer, batch_size=100) as tb_tracker:
             for step_idx, exp in enumerate(exp_source):
-
                 # same between A2C and PPO
                 rewards_steps = exp_source.pop_rewards_steps()
                 if rewards_steps:
@@ -380,9 +420,7 @@ def main(
                         device_str,
                     )
                     mu_v = net_act(traj_states_v)
-                    old_logprob_v = calc_logprob(
-                        mu_v, net_act.logstd, traj_actions_v
-                    )
+                    old_logprob_v = calc_logprob(mu_v, net_act.logstd, traj_actions_v)
 
                     # normalize advantages
                     traj_adv_v = traj_adv_v - torch.mean(traj_adv_v)
@@ -396,7 +434,7 @@ def main(
                     sum_loss_policy = 0.0
                     count_steps = 0
 
-                    for epoch in range(PPO_EPOCHS):
+                    for _ in range(PPO_EPOCHS):
                         for batch_ofs in range(0, len(trajectory), PPO_BATCH_SIZE):
                             batch_l = batch_ofs + PPO_BATCH_SIZE
                             states_v = traj_states_v[batch_ofs:batch_l]
@@ -447,6 +485,9 @@ def main(
                     writer.add_scalar(
                         "loss_value", sum_loss_value / count_steps, step_idx
                     )
+
+                elif algorithm == "sac":
+                    pass
 
 
 if __name__ == "__main__":

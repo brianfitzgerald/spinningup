@@ -98,19 +98,16 @@ Vmin = -10
 N_ATOMS = 51
 DELTA_Z = (Vmax - Vmin) / (N_ATOMS - 1)
 
+
 def distr_projection(
-        next_distr: np.ndarray,
-        rewards: np.ndarray,
-        dones: np.ndarray,
-        gamma: float
+    next_distr: np.ndarray, rewards: np.ndarray, dones: np.ndarray, gamma: float
 ):
     """
     Perform distribution projection aka Catergorical Algorithm from the
     "A Distributional Perspective on RL" paper
     """
     batch_size = len(rewards)
-    proj_distr = np.zeros((batch_size, N_ATOMS),
-                          dtype=np.float32)
+    proj_distr = np.zeros((batch_size, N_ATOMS), dtype=np.float32)
     delta_z = (Vmax - Vmin) / (N_ATOMS - 1)
     for atom in range(N_ATOMS):
         v = rewards + (Vmin + atom * delta_z) * gamma
@@ -119,17 +116,17 @@ def distr_projection(
         l = np.floor(b_j).astype(np.int64)
         u = np.ceil(b_j).astype(np.int64)
         eq_mask = u == l
-        proj_distr[eq_mask, l[eq_mask]] += \
-            next_distr[eq_mask, atom]
+        proj_distr[eq_mask, l[eq_mask]] += next_distr[eq_mask, atom]
         ne_mask = u != l
-        proj_distr[ne_mask, l[ne_mask]] += \
+        proj_distr[ne_mask, l[ne_mask]] += (
             next_distr[ne_mask, atom] * (u - b_j)[ne_mask]
-        proj_distr[ne_mask, u[ne_mask]] += \
+        )
+        proj_distr[ne_mask, u[ne_mask]] += (
             next_distr[ne_mask, atom] * (b_j - l)[ne_mask]
+        )
     if dones.any():
         proj_distr[dones] = 0.0
-        tz_j = np.minimum(
-            Vmax, np.maximum(Vmin, rewards[dones]))
+        tz_j = np.minimum(Vmax, np.maximum(Vmin, rewards[dones]))
         b_j = (tz_j - Vmin) / delta_z
         l = np.floor(b_j).astype(np.int64)
         u = np.ceil(b_j).astype(np.int64)
@@ -142,12 +139,9 @@ def distr_projection(
         ne_dones = dones.copy()
         ne_dones[dones] = ne_mask
         if ne_dones.any():
-            proj_distr[ne_dones, l[ne_mask]] = \
-                (u - b_j)[ne_mask]
-            proj_distr[ne_dones, u[ne_mask]] = \
-                (b_j - l)[ne_mask]
+            proj_distr[ne_dones, l[ne_mask]] = (u - b_j)[ne_mask]
+            proj_distr[ne_dones, u[ne_mask]] = (b_j - l)[ne_mask]
     return proj_distr
-
 
 
 class D4PGCritic(nn.Module):
@@ -177,57 +171,6 @@ class D4PGCritic(nn.Module):
         weights = F.softmax(distr, dim=1) * self.supports
         res = weights.sum(dim=1)
         return res.unsqueeze(dim=-1)
-
-
-class AgentDDPG(BaseAgent):
-    """
-    Agent implementing Orstein-Uhlenbeck exploration process
-    """
-
-    def __init__(
-        self,
-        net: DDPGActor,
-        device: torch.device = torch.device("cpu"),
-        ou_enabled: bool = True,
-        ou_mu: float = 0.0,
-        ou_teta: float = 0.15,
-        ou_sigma: float = 0.2,
-        ou_epsilon: float = 1.0,
-    ):
-        self.net = net
-        self.device = device
-        self.ou_enabled = ou_enabled
-        self.ou_mu = ou_mu
-        self.ou_teta = ou_teta
-        self.ou_sigma = ou_sigma
-        self.ou_epsilon = ou_epsilon
-
-    def initial_state(self):
-        return None
-
-    def __call__(self, states: States, agent_states: AgentStates):
-        states_v = float32_preprocessor(states)
-        states_v = states_v.to(self.device)
-        mu_v = self.net(states_v)
-        actions = mu_v.data.cpu().numpy()
-
-        if self.ou_enabled and self.ou_epsilon > 0:
-            new_a_states = []
-            for a_state, action in zip(agent_states, actions):
-                if a_state is None:
-                    a_state = np.zeros(shape=action.shape, dtype=np.float32)
-                # Add noise to the agent state
-                a_state += self.ou_teta * (self.ou_mu - a_state)
-                a_state += self.ou_sigma * np.random.normal(size=action.shape)
-
-                action += self.ou_epsilon * a_state
-                new_a_states.append(a_state)
-        else:
-            new_a_states = agent_states
-
-        actions = np.clip(actions, -1, 1)
-        return actions, new_a_states
-
 
 
 def test_net(
@@ -276,7 +219,6 @@ AlgorithmChoice = Literal["ddpg", "d4pg"]
 
 
 def main(env_id: str = "cheetah", envs_count: int = 1, algo: AlgorithmChoice = "d4pg"):
-
     device_name = get_device()
     device = torch.device(device_name)
 

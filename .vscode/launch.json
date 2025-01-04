@@ -2,6 +2,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Chapter 16",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rl_handson/chapter_16.py",
+            "console": "integratedTerminal",
+            "args": [
+                // "--checkpoint",
+                // "best_halfcheetah_ch16.dat"
+                "--algorithm",
+                "ppo"
+            ]
+        },
+        {
             "name": "Chapter 7-9",
             "type": "debugpy",
             "request": "launch",
@@ -20,19 +33,6 @@
             "args": [
                 "--environment",
                 "frozenlake"
-            ]
-        },
-        {
-            "name": "Chapter 16",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "rl_handson/chapter_16.py",
-            "console": "integratedTerminal",
-            "args": [
-                // "--checkpoint",
-                // "best_halfcheetah_ch16.dat"
-                "--algorithm",
-                "ppo"
             ]
         },
     ]
