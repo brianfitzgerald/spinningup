@@ -426,7 +426,7 @@ class TargetNet:
     def alpha_sync(self, alpha):
         """
         Blend params of target net with params from the model
-        :param alpha:
+        :param alpha: the proportion of the model to copy to the target net
         """
         assert isinstance(alpha, float)
         assert 0.0 < alpha <= 1.0

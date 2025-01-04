@@ -40,7 +40,6 @@ from typing import List, Literal, Optional, Sequence
 import fire
 import gymnasium as gym
 import numpy as np
-import ptan
 import torch
 import torch.distributions as distr
 import torch.nn as nn
@@ -49,24 +48,21 @@ import torch.optim as optim
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from lib import MUJOCO_ENV_IDS, RewardTracker, ensure_directory, get_device
 from loguru import logger
+from models import ModelSACTwinQ
 from ptan import (
     AgentStates,
     BaseAgent,
     Experience,
     ExperienceFirstLast,
-    ExperienceSource,
-    States,
-    TBMeanTracker,
-    TargetNet,
-    float32_preprocessor,
     ExperienceReplayBuffer,
     ExperienceSourceFirstLast,
+    States,
+    TargetNet,
+    TBMeanTracker,
+    float32_preprocessor,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
-from loguru import logger
-
-from models import ModelSACTwinQ
 
 
 class ModelActor(nn.Module):
@@ -124,7 +120,7 @@ class AgentA2C(BaseAgent):
 def test_net(
     net: ModelActor,
     env: gym.Env,
-    count: int = 2,
+    count: int = 1,
     device: torch.device = torch.device("cpu"),
 ):
     rewards = 0.0
@@ -278,18 +274,19 @@ def main(
     env_id: str = "ant",
     save_path: str = "saves",
     checkpoint: Optional[str] = None,
-    envs_count: int = 10,
+    envs_count: int = 50,
     algorithm: AlgorithmChoice = "sac",
 ):
     env_id = MUJOCO_ENV_IDS[env_id]
-    logger.info(f"Training {algorithm} on env {env_id}")
     envs = [gym.make(env_id) for _ in range(envs_count)]
     test_env = gym.make(env_id, render_mode="rgb_array")
     ensure_directory(save_path, True)
     video_path = os.path.join("videos", f"{algorithm}-{env_id}")
     ensure_directory(video_path, True)
     test_env = RecordVideo(test_env, video_path)
-    test_env = TimeLimit(test_env, max_episode_steps=10)
+    test_env = TimeLimit(test_env, max_episode_steps=1000)
+
+    logger.info(f"Training {algorithm} on env {env_id}")
 
     GAMMA = 0.99
     REWARD_STEPS = 5
@@ -422,9 +419,7 @@ def main(
 
                     if frame_idx % TEST_ITERS == 0:
                         ts = time.time()
-                        rewards, steps = test_net(
-                            net_act, test_env, device=device
-                        )
+                        rewards, steps = test_net(net_act, test_env, device=device)
                         print(
                             "Test done in %.2f sec, reward %.3f, steps %d"
                             % (time.time() - ts, rewards, steps)
