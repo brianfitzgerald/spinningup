@@ -10,8 +10,6 @@
             "args": [
                 // "--checkpoint",
                 // "best_halfcheetah_ch16.dat"
-                "--algorithm",
-                "ppo"
             ]
         },
         {

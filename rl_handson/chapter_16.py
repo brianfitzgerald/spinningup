@@ -236,7 +236,7 @@ def unpack_batch_ppo(
 
 @torch.no_grad()
 def unpack_batch_sac(
-    batch: Sequence[tuple[ExperienceFirstLast]],
+    batch: Sequence[ExperienceFirstLast],
     val_net: nn.Module,
     twinq_net: nn.Module,
     policy_net: ModelActor,
@@ -247,8 +247,7 @@ def unpack_batch_sac(
     """
     Unpack Soft Actor-Critic batch
     """
-    exp = [b[0] for b in batch]
-    states_v, actions_v, ref_q_v = unpack_batch_a2c(exp, val_net, gamma, device)
+    states_v, actions_v, ref_q_v = unpack_batch_a2c(batch, val_net, gamma, device)
 
     # references for the critic network
     mu_v = policy_net(states_v)
@@ -374,7 +373,7 @@ def main(
                     if len(buffer) < REPLAY_INITIAL:
                         continue
 
-                    batch: List[tuple[ExperienceFirstLast]] = buffer.sample(BATCH_SIZE)  # type: ignore
+                    batch: List[ExperienceFirstLast] = buffer.sample(BATCH_SIZE)  # type: ignore
                     states_v, actions_v, ref_vals_v, ref_q_v = unpack_batch_sac(
                         batch,
                         tgt_crt_net.target_model,
@@ -393,6 +392,7 @@ def main(
                     q1_v, q2_v = twinq_net(states_v, actions_v)
                     q1_loss_v = F.mse_loss(q1_v.squeeze(), ref_q_v.detach())
                     q2_loss_v = F.mse_loss(q2_v.squeeze(), ref_q_v.detach())
+                    # Sum the losses from the two Q networks
                     q_loss_v = q1_loss_v + q2_loss_v
                     q_loss_v.backward()
                     twinq_opt.step()
@@ -402,6 +402,7 @@ def main(
                     # Critic
                     opt_crt.zero_grad()
                     val_v = net_crt(states_v)
+                    # Just MSE loss between the value and the reference value
                     v_loss_v = F.mse_loss(val_v.squeeze(), ref_vals_v.detach())
                     v_loss_v.backward()
                     opt_crt.step()
@@ -411,6 +412,7 @@ def main(
                     opt_act.zero_grad()
                     acts_v = net_act(states_v)
                     q_out_v, _ = twinq_net(states_v, acts_v)
+                    # loss is the negative of the Q value
                     act_loss = -q_out_v.mean()
                     act_loss.backward()
                     opt_act.step()
