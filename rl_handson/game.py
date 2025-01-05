@@ -1,26 +1,6 @@
 from typing import List
-from abc import ABC, abstractmethod
 
-
-class BaseGame(ABC):
-    @abstractmethod
-    def clear(self):
-        pass
-
-    @abstractmethod
-    def find_leaf(self, state_int: int, player: int):
-        pass
-
-    @abstractmethod
-    def search_batch(self, count, batch_size, state_int, player, net, device="cpu"):
-        pass
-
-    @abstractmethod
-    def get_policy_value(self, state_int, tau=1):
-        pass
-
-
-class ConnectFour(BaseGame):
+class ConnectFour:
     def __init__(
         self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
     ):

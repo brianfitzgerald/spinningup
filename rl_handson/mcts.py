@@ -62,25 +62,6 @@ class MCTS:
     Class keeps statistics for every state encountered during the search
     """
 
-    def _encode_list_state(
-        self, dest_np: np.ndarray, state_list: tt.List[tt.List[int]], who_move: int
-    ):
-        """
-        In-place encodes list state into the zero numpy array
-        :param dest_np: dest array, expected to be zero
-        :param state_list: state of the game in the list form
-        :param who_move: player index (game.PLAYER_WHITE or game.PLAYER_BLACK) who to move
-        """
-        assert dest_np.shape == OBS_SHAPE
-
-        for col_idx, col in enumerate(state_list):
-            for rev_row_idx, cell in enumerate(col):
-                row_idx = game.GAME_ROWS - rev_row_idx - 1
-                if cell == who_move:
-                    dest_np[0, row_idx, col_idx] = 1.0
-                else:
-                    dest_np[1, row_idx, col_idx] = 1.0
-
     def __init__(self, game: ConnectFour, c_puct: float = 1.0):
         self.c_puct = c_puct
         # count of visits, state_int -> [N(s, a)]
@@ -92,6 +73,26 @@ class MCTS:
         # prior probability of actions, state_int -> [P(s,a)]
         self.probs: tt.Dict[int, tt.List[float]] = {}
         self.game = game
+        self.obs_shape = (2, game.rows, game.cols)
+
+    def _encode_list_state(
+        self, dest_np: np.ndarray, state_list: tt.List[tt.List[int]], who_move: int
+    ):
+        """
+        In-place encodes list state into the zero numpy array
+        :param dest_np: dest array, expected to be zero
+        :param state_list: state of the game in the list form
+        :param who_move: player index (game.PLAYER_WHITE or game.PLAYER_BLACK) who to move
+        """
+        assert dest_np.shape == self.obs_shape
+
+        for col_idx, col in enumerate(state_list):
+            for rev_row_idx, cell in enumerate(col):
+                row_idx = self.game.rows - rev_row_idx - 1
+                if cell == who_move:
+                    dest_np[0, row_idx, col_idx] = 1.0
+                else:
+                    dest_np[1, row_idx, col_idx] = 1.0
 
     def clear(self):
         self.visit_count.clear()
@@ -130,6 +131,8 @@ class MCTS:
 
             # choose action to take, in the root node add the Dirichlet noise to the probs
             if cur_state == state_int:
+                # apply noise per column
+                # Dirlichet is a distribution over a simplex, so the sum of the probabilities is 1
                 noises = np.random.dirichlet([0.03] * self.game.cols)
                 probs = [
                     0.75 * prob + 0.25 * noise for prob, noise in zip(probs, noises)

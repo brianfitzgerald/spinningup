@@ -80,7 +80,7 @@ def play_game(
     mcts_searches: int,
     mcts_batch_size: int,
     net1_plays_first: Optional[bool] = None,
-    device: torch.device = torch.device("cpu"),
+    device: str = "cpu",
 ):
     """
     Play one single game, memorizing transitions into the replay buffer

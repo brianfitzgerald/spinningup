@@ -44,6 +44,7 @@ In AlphaGo:
 
 """
 
+from collections import deque
 import os
 import random
 import time
@@ -57,8 +58,11 @@ from ptan import (
     TBMeanTracker,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
+import torch.nn.functional as F
 
-from muzero import Net
+from muzero import Net, play_game
+from game import ConnectFour
+from mcts import MCTS
 
 PLAY_EPISODES = 1  # 25
 MCTS_SEARCHES = 10
@@ -76,9 +80,9 @@ EVALUATION_ROUNDS = 20
 STEPS_BEFORE_TAU_0 = 10
 
 
-def evaluate(net1: Net, net2: Net, rounds: int, device: torch.device):
+def evaluate(net1: Net, net2: Net, rounds: int, game: ConnectFour, device: str):
     n1_win, n2_win = 0, 0
-    mcts_stores = [MCTS(), MCTS()]
+    mcts_stores = [MCTS(game), MCTS(game)]
 
     for r_idx in range(rounds):
         r, _ = play_game(
@@ -104,14 +108,15 @@ def main(name: str = "mcts"):
     os.makedirs(saves_path, exist_ok=True)
     writer = SummaryWriter(comment="-" + name)
 
-    net = Net(input_shape=model.OBS_SHAPE, actions_n=game.GAME_COLS).to(device)
+    game = ConnectFour()
+    net = Net(input_shape=game.obs_shape, actions_n=game.cols).to(device)
     best_net = TargetNet(net)
     print(net)
 
     optimizer = optim.SGD(net.parameters(), lr=LEARNING_RATE, momentum=0.9)
 
     replay_buffer = deque(maxlen=REPLAY_BUFFER)
-    mcts_store = mcts.MCTS()
+    mcts_store = MCTS(game)
     step_idx = 0
     best_idx = 0
 
@@ -166,8 +171,8 @@ def main(name: str = "mcts"):
                 batch_states_lists = [
                     game.decode_binary(state) for state in batch_states
                 ]
-                states_v = model.state_lists_to_batch(
-                    batch_states_lists, batch_who_moves, device
+                states_v = mcts_store.state_lists_to_batch(
+                    batch_states_lists, batch_who_moves, game, device
                 )
 
                 optimizer.zero_grad()
@@ -193,7 +198,7 @@ def main(name: str = "mcts"):
             # evaluate net
             if step_idx % EVALUATE_EVERY_STEP == 0:
                 win_ratio = evaluate(
-                    net, best_net.target_model, rounds=EVALUATION_ROUNDS, device=device
+                    net, best_net.target_model, rounds=EVALUATION_ROUNDS, game=game, device=device
                 )
                 print("Net evaluated, win ratio = %.2f" % win_ratio)
                 writer.add_scalar("eval_win_ratio", win_ratio, step_idx)
