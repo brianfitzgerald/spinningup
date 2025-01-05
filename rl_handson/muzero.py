@@ -139,6 +139,7 @@ def play_game(
         if step >= steps_before_tau_0:
             tau = 0
 
+    # Add game transitions into the replay buffer
     if replay_buffer is not None:
         for state, cur_player, probs in reversed(game_history):
             replay_buffer.append((state, cur_player, probs, result))

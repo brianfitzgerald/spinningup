@@ -42,6 +42,8 @@ In AlphaGo:
 - Use minibatches from the replay buffer, filled from the self-play games, to train the neural network
 - Minimize the MSE between the value head position and the actual position value, as well as the CE loss between the policy head and the actual policy
 
+So basic flow is to play games with MCTS, record transitions, then train on those as a supervised learning problem.
+
 """
 
 from collections import deque
@@ -52,13 +54,14 @@ import time
 import fire
 import torch
 import torch.optim as optim
-from lib import get_device
+from lib import ensure_directory, get_device
 from ptan import (
     TargetNet,
     TBMeanTracker,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
 import torch.nn.functional as F
+from loguru import logger
 
 from muzero import Net, play_game
 from game import ConnectFour
@@ -110,7 +113,7 @@ def evaluate(
 def main(name: str = "mcts"):
     device = get_device()
     saves_path = os.path.join("saves", name)
-    os.makedirs(saves_path, exist_ok=True)
+    ensure_directory(saves_path)
     writer = SummaryWriter(comment="-" + name)
 
     game = ConnectFour()
@@ -133,6 +136,7 @@ def main(name: str = "mcts"):
             prev_nodes = len(mcts_store)
             game_steps = 0
             for _ in range(PLAY_EPISODES):
+                # Play a single round of the game - connect 4 or chess
                 _, steps = play_game(
                     game=game,
                     mcts_stores=mcts_store,
@@ -145,13 +149,15 @@ def main(name: str = "mcts"):
                     device=device,
                 )
                 game_steps += steps
+
+            # Track the speed of the game
             game_nodes = len(mcts_store) - prev_nodes
             dt = time.time() - t
             speed_steps = game_steps / dt
             speed_nodes = game_nodes / dt
             tb_tracker.track("speed_steps", speed_steps, step_idx)
             tb_tracker.track("speed_nodes", speed_nodes, step_idx)
-            print(
+            logger.info(
                 "Step %d, steps %3d, leaves %4d, steps/s %5.2f, leaves/s %6.2f, best_idx %d, replay %d"
                 % (
                     step_idx,
@@ -212,14 +218,14 @@ def main(name: str = "mcts"):
                     game=game,
                     device=device,
                 )
-                print("Net evaluated, win ratio = %.2f" % win_ratio)
+                logger.info("Net evaluated, win ratio = %.2f" % win_ratio)
                 writer.add_scalar("eval_win_ratio", win_ratio, step_idx)
                 if win_ratio > BEST_NET_WIN_RATIO:
-                    print("Net is better than cur best, sync")
+                    logger.info("Net is better than cur best, sync")
                     best_net.sync()
                     best_idx += 1
                     file_name = os.path.join(
-                        saves_path, "best_%03d_%05d.dat" % (best_idx, step_idx)
+                        saves_path, f"best_{best_idx}_{win_ratio}_%.3f.dat"
                     )
                     torch.save(net.state_dict(), file_name)
                     mcts_store.clear()

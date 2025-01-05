@@ -42,7 +42,7 @@ def state_lists_to_batch(
     game: ConnectFour,
     device: str = "cpu",
     obs_shape: tuple[int, int, int] = (2, 6, 7),
-):
+) -> torch.Tensor:
     """
     Convert list of list states to batch for network
     :param state_lists: list of 'list states'
@@ -63,6 +63,8 @@ class MCTS:
     """
 
     def __init__(self, game: ConnectFour, c_puct: float = 1.0):
+        # constant for the PUCT formula
+        # Q = c_puct * P(s, a) * sqrt(sum(N(s, b)) / (1 + N(s, a)))
         self.c_puct = c_puct
         # count of visits, state_int -> [N(s, a)]
         self.visit_count: tt.Dict[int, tt.List[int]] = {}
@@ -102,7 +104,9 @@ class MCTS:
     def __len__(self):
         return len(self.value)
 
-    def find_leaf(self, state_int: int, player: int):
+    def find_leaf(
+        self, state_int: int, player: int
+    ) -> tt.Tuple[float, int, int, tt.List[int], tt.List[int]]:
         """
         Traverse the tree until the end of game or leaf node
         :param state_int: root node state
@@ -136,10 +140,15 @@ class MCTS:
                 probs = [
                     0.75 * prob + 0.25 * noise for prob, noise in zip(probs, noises)
                 ]
+
+            # PUCT formula
+            # Q = c_puct * P(s, a) * sqrt(sum(N(s, b)) / (1 + N(s, a)))
             score = [
                 value + self.c_puct * prob * total_sqrt / (1 + count)
                 for value, prob, count in zip(values_avg, probs, counts)
             ]
+
+            # zero the likelihood of all invalid actions
             invalid_actions = set(range(self.game.cols)) - set(
                 self.game.possible_moves(cur_state)
             )
@@ -147,6 +156,7 @@ class MCTS:
                 score[invalid] = -np.inf
             action = int(np.argmax(score))
             actions.append(action)
+            # perform move
             cur_state, won = self.game.move(cur_state, action, cur_player)
             if won:
                 # if somebody won the game, the value of the final state is -1 (as it is on opponent's turn)
@@ -157,6 +167,7 @@ class MCTS:
             if value is None and moves_count == 0:
                 value = 0.0
 
+        assert value is not None
         return value, cur_state, cur_player, states, actions
 
     def is_leaf(self, state_int):
@@ -169,6 +180,7 @@ class MCTS:
     def search_minibatch(self, count, state_int, player, net, device="cpu"):
         """
         Perform several MCTS searches.
+        These can all be independent within a batch
         """
         backup_queue = []
         expand_states = []
@@ -180,8 +192,10 @@ class MCTS:
                 state_int, player
             )
             if value is not None:
+                # found a final state, add it to the backup queue
                 backup_queue.append((value, states, actions))
             else:
+                # found a final state, but it is not a leaf
                 if leaf_state not in planned:
                     planned.add(leaf_state)
                     leaf_state_lists = self.game.decode_binary(leaf_state)
