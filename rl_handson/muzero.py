@@ -82,6 +82,7 @@ class Net(nn.Module):
         val = self.value(val)
         # policy output
         pol = self.conv_policy(v)
+        pol = self.policy(pol)
         return pol, val
 
 

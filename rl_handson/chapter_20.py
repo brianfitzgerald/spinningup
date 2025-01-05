@@ -202,7 +202,6 @@ def main(name: str = "mcts"):
                 out_logits_v, out_values_v = net(states_v)
 
                 out_values_v = out_values_v.squeeze(-1)
-                print("loss shapes", out_values_v.shape, values_v.shape)
                 loss_value_v = F.mse_loss(out_values_v, values_v)
                 loss_policy_v = -F.log_softmax(out_logits_v, dim=1) * probs_v
                 loss_policy_v = loss_policy_v.sum(dim=1).mean()
