@@ -13,24 +13,38 @@ class Net(nn.Module):
     def __init__(self, input_shape, actions_n, num_filters):
         super(Net, self).__init__()
 
-        conv_blocks = [
-            # Input conv
+        self.conv_in = nn.Sequential(
             nn.Conv2d(input_shape[0], num_filters, kernel_size=3, padding=1),
             nn.BatchNorm2d(num_filters),
             nn.LeakyReLU(),
-        ]
+        )
 
-        # Add 5 residual conv blocks
-        for _ in range(5):
-            conv_blocks.extend(
-                [
-                    nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
-                    nn.BatchNorm2d(num_filters),
-                    nn.LeakyReLU(),
-                ]
-            )
-
-        self.conv_layers = nn.Sequential(*conv_blocks)
+        # layers with residual
+        self.conv_1 = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(),
+        )
+        self.conv_2 = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(),
+        )
+        self.conv_3 = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(),
+        )
+        self.conv_4 = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(),
+        )
+        self.conv_5 = nn.Sequential(
+            nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1),
+            nn.BatchNorm2d(num_filters),
+            nn.LeakyReLU(),
+        )
 
         body_shape = (num_filters,) + input_shape[1:]
 
@@ -53,21 +67,20 @@ class Net(nn.Module):
             nn.LeakyReLU(),
             nn.Flatten(),
         )
-        size: int = self.conv_policy(torch.zeros(1, *body_shape)).size()[-1]
+        size = self.conv_policy(torch.zeros(1, *body_shape)).size()[-1]
         self.policy = nn.Sequential(nn.Linear(size, actions_n))
 
     def forward(self, x):
-        # Apply conv layers with residual connections
-        v = x
-        for i in range(
-            0, len(self.conv_layers), 3
-        ):  # Step by 3 since each block has 3 layers
-            if i == 0:
-                v = self.conv_layers[i : i + 3](v)  # First block (input conv)
-            else:
-                v = v + self.conv_layers[i : i + 3](v)  # Residual blocks
-
+        v = self.conv_in(x)
+        v = v + self.conv_1(v)
+        v = v + self.conv_2(v)
+        v = v + self.conv_3(v)
+        v = v + self.conv_4(v)
+        v = v + self.conv_5(v)
+        # value output
         val = self.conv_val(v)
+        val = self.value(val)
+        # policy output
         pol = self.conv_policy(v)
         return pol, val
 
@@ -119,7 +132,9 @@ def play_game(
             nets[cur_player],
             device=device,
         )
-        probs, _ = mcts_stores[cur_player].get_policy_value(state, tau=tau, n_cols=game.cols)
+        probs, _ = mcts_stores[cur_player].get_policy_value(
+            state, tau=tau, n_cols=game.cols
+        )
         game_history.append((state, cur_player, probs))
         action = np.random.choice(game.cols, p=probs)
         if action not in game.possible_moves(state):
@@ -140,6 +155,7 @@ def play_game(
             tau = 0
 
     # Add game transitions into the replay buffer
+    # alternate the players to be the player1 in the transitions
     if replay_buffer is not None:
         for state, cur_player, probs in reversed(game_history):
             replay_buffer.append((state, cur_player, probs, result))

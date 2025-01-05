@@ -16,7 +16,6 @@ def _encode_list_state(
     state_list: tt.List[tt.List[int]],
     who_move: int,
     game_rows: int,
-    game_cols: int,
     obs_shape: tuple[int, int, int],
 ):
     """
@@ -53,7 +52,7 @@ def state_lists_to_batch(
     batch_size = len(state_lists)
     batch = np.zeros((batch_size,) + obs_shape, dtype=np.float32)
     for idx, (state, who_move) in enumerate(zip(state_lists, who_moves_lists)):
-        _encode_list_state(batch[idx], state, who_move, game.rows, game.cols, obs_shape)
+        _encode_list_state(batch[idx], state, who_move, game.rows, obs_shape)
     return torch.tensor(batch).to(device)
 
 
@@ -106,7 +105,7 @@ class MCTS:
 
     def find_leaf(
         self, state_int: int, player: int
-    ) -> tt.Tuple[float, int, int, tt.List[int], tt.List[int]]:
+    ) -> tt.Tuple[tt.Optional[float], int, int, tt.List[int], tt.List[int]]:
         """
         Traverse the tree until the end of game or leaf node
         :param state_int: root node state
@@ -167,7 +166,6 @@ class MCTS:
             if value is None and moves_count == 0:
                 value = 0.0
 
-        assert value is not None
         return value, cur_state, cur_player, states, actions
 
     def is_leaf(self, state_int):

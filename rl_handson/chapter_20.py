@@ -71,11 +71,11 @@ import torch.nn as nn
 PLAY_EPISODES = 1  # 25
 MCTS_SEARCHES = 10
 MCTS_BATCH_SIZE = 8
-REPLAY_BUFFER = 5000  # 30000
+REPLAY_BUFFER_SIZE = 5000  # 30000
 LEARNING_RATE = 0.001
 BATCH_SIZE = 256
 TRAIN_ROUNDS = 10
-MIN_REPLAY_TO_TRAIN = 2000  # 10000
+MIN_REPLAY_TO_TRAIN = 256  # 10000
 
 BEST_NET_WIN_RATIO = 0.60
 
@@ -125,7 +125,10 @@ def main(name: str = "mcts"):
 
     optimizer = optim.SGD(net.parameters(), lr=LEARNING_RATE, momentum=0.9)
 
-    replay_buffer = deque(maxlen=REPLAY_BUFFER)
+    assert MIN_REPLAY_TO_TRAIN >= BATCH_SIZE, "Replay buffer size should be larger than batch size"
+
+    # format is (state, cur_player, probs, result)
+    replay_buffer = deque(maxlen=REPLAY_BUFFER_SIZE)
     mcts_store = MCTS(game)
     step_idx = 0
     best_idx = 0
@@ -158,7 +161,7 @@ def main(name: str = "mcts"):
             tb_tracker.track("speed_steps", speed_steps, step_idx)
             tb_tracker.track("speed_nodes", speed_nodes, step_idx)
             logger.info(
-                "Step %d, steps %3d, leaves %4d, steps/s %5.2f, leaves/s %6.2f, best_idx %d, replay %d"
+                "Step %d, steps %3d, leaves %4d, steps/s %5.2f, leaves/s %6.2f, best_idx %d, replay buffer len %d"
                 % (
                     step_idx,
                     game_steps,
@@ -185,6 +188,7 @@ def main(name: str = "mcts"):
                 batch_states_lists = [
                     game.decode_binary(state) for state in batch_states
                 ]
+                # get batch of game states
                 states_v = state_lists_to_batch(
                     batch_states_lists, batch_who_moves, game, device
                 )
@@ -192,9 +196,14 @@ def main(name: str = "mcts"):
                 optimizer.zero_grad()
                 probs_v = torch.FloatTensor(batch_probs).to(device)
                 values_v = torch.FloatTensor(batch_values).to(device)
+                # states_v is (256, 2, 6, 7) - player, then board
+                # different channels per player so the game state is invariant to which player is playing
+                # value head returns the value of every possible action, and a single value float which is the value of the state
                 out_logits_v, out_values_v = net(states_v)
 
-                loss_value_v = F.mse_loss(out_values_v.squeeze(-1), values_v)
+                out_values_v = out_values_v.squeeze(-1)
+                print("loss shapes", out_values_v.shape, values_v.shape)
+                loss_value_v = F.mse_loss(out_values_v, values_v)
                 loss_policy_v = -F.log_softmax(out_logits_v, dim=1) * probs_v
                 loss_policy_v = loss_policy_v.sum(dim=1).mean()
 
