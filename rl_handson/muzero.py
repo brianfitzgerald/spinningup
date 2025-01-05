@@ -1,8 +1,12 @@
+from collections import deque
 import torch
 import torch.nn as nn
 
 import numpy as np
-from typing import Tuple, Optional
+from typing import List, Union, Optional
+
+from mcts import MCTS
+
 
 class Net(nn.Module):
     def __init__(self, input_shape, actions_n, num_filters):
@@ -67,11 +71,17 @@ class Net(nn.Module):
         return pol, val
 
 
-def play_game(mcts_stores: Optional[Union[mcts.MCTS, List[mcts.MCTS]]],
-                replay_buffer: Optional[collections.deque], net1: Net, net2: Net,
-                steps_before_tau_0: int, mcts_searches: int, mcts_batch_size: int,
-                net1_plays_first: Optional[bool] = None,
-                device: torch.device = torch.device("cpu")):
+def play_game(
+    mcts_stores: Optional[Union[MCTS, List[MCTS]]],
+    replay_buffer: Optional[deque],
+    net1: Net,
+    net2: Net,
+    steps_before_tau_0: int,
+    mcts_searches: int,
+    mcts_batch_size: int,
+    net1_plays_first: Optional[bool] = None,
+    device: torch.device = torch.device("cpu"),
+):
     """
     Play one single game, memorizing transitions into the replay buffer
     :param mcts_stores: could be None or single MCTS or two MCTSes for individual net
@@ -81,8 +91,8 @@ def play_game(mcts_stores: Optional[Union[mcts.MCTS, List[mcts.MCTS]]],
     :return: value for the game in respect to player1 (+1 if p1 won, -1 if lost, 0 if draw)
     """
     if mcts_stores is None:
-        mcts_stores = [mcts.MCTS(), mcts.MCTS()]
-    elif isinstance(mcts_stores, mcts.MCTS):
+        mcts_stores = [MCTS(), MCTS()]
+    elif isinstance(mcts_stores, MCTS):
         mcts_stores = [mcts_stores, mcts_stores]
 
     state = game.INITIAL_STATE
@@ -100,8 +110,13 @@ def play_game(mcts_stores: Optional[Union[mcts.MCTS, List[mcts.MCTS]]],
 
     while result is None:
         mcts_stores[cur_player].search_batch(
-            mcts_searches, mcts_batch_size, state,
-            cur_player, nets[cur_player], device=device)
+            mcts_searches,
+            mcts_batch_size,
+            state,
+            cur_player,
+            nets[cur_player],
+            device=device,
+        )
         probs, _ = mcts_stores[cur_player].get_policy_value(state, tau=tau)
         game_history.append((state, cur_player, probs))
         action = np.random.choice(game.GAME_COLS, p=probs)
@@ -112,7 +127,7 @@ def play_game(mcts_stores: Optional[Union[mcts.MCTS, List[mcts.MCTS]]],
             result = 1
             net1_result = 1 if cur_player == 0 else -1
             break
-        cur_player = 1-cur_player
+        cur_player = 1 - cur_player
         # check the draw case
         if len(game.possible_moves(state)) == 0:
             result = 0

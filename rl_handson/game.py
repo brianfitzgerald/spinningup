@@ -1,5 +1,29 @@
-class ConnectFour:
-    def __init__(self, rows=6, cols=7, bits_in_len=3, count_to_win=4):
+from typing import List
+from abc import ABC, abstractmethod
+
+
+class BaseGame(ABC):
+    @abstractmethod
+    def clear(self):
+        pass
+
+    @abstractmethod
+    def find_leaf(self, state_int: int, player: int):
+        pass
+
+    @abstractmethod
+    def search_batch(self, count, batch_size, state_int, player, net, device="cpu"):
+        pass
+
+    @abstractmethod
+    def get_policy_value(self, state_int, tau=1):
+        pass
+
+
+class ConnectFour(BaseGame):
+    def __init__(
+        self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
+    ):
         self.rows = rows
         self.cols = cols
         self.bits_in_len = bits_in_len
@@ -8,7 +32,7 @@ class ConnectFour:
         self.player_white = 0
         self.initial_state = self.encode_lists([[]] * self.cols)
 
-    def bits_to_int(self, bits):
+    def bits_to_int(self, bits) -> int:
         res = 0
         for b in bits:
             res *= 2
@@ -22,7 +46,7 @@ class ConnectFour:
             num //= 2
         return res[::-1]
 
-    def encode_lists(self, field_lists):
+    def encode_lists(self, field_lists: List[List[int]]) -> int:
         """
         Encode lists representation into the binary numbers
         :param field_lists: list of self.cols lists with 0s and 1s
@@ -48,12 +72,16 @@ class ConnectFour:
         :return: list of self.cols lists
         """
         assert isinstance(state_int, int)
-        bits = self.int_to_bits(state_int, bits=self.cols * self.rows + self.cols * self.bits_in_len)
+        bits = self.int_to_bits(
+            state_int, bits=self.cols * self.rows + self.cols * self.bits_in_len
+        )
         res = []
-        len_bits = bits[self.cols * self.rows:]
+        len_bits = bits[self.cols * self.rows :]
         for col in range(self.cols):
-            vals = bits[col * self.rows:(col + 1) * self.rows]
-            lens = self.bits_to_int(len_bits[col * self.bits_in_len:(col + 1) * self.bits_in_len])
+            vals = bits[col * self.rows : (col + 1) * self.rows]
+            lens = self.bits_to_int(
+                len_bits[col * self.bits_in_len : (col + 1) * self.bits_in_len]
+            )
             if lens > 0:
                 vals = vals[:-lens]
             res.append(vals)
@@ -121,23 +149,25 @@ class ConnectFour:
         assert len(field[col]) < self.rows
         field[col].append(player)
         # check for victory: the simplest vertical case
-        suff = field[col][-self.count_to_win:]
+        suff = field[col][-self.count_to_win :]
         won = suff == [player] * self.count_to_win
         if not won:
-            won = (self._check_won(field, col, 0) or 
-                  self._check_won(field, col, 1) or 
-                  self._check_won(field, col, -1))
+            won = (
+                self._check_won(field, col, 0)
+                or self._check_won(field, col, 1)
+                or self._check_won(field, col, -1)
+            )
         state_new = self.encode_lists(field)
         return state_new, won
 
     def render(self, state_int):
         state_list = self.decode_binary(state_int)
-        data = [[' '] * self.cols for _ in range(self.rows)]
+        data = [[" "] * self.cols for _ in range(self.rows)]
         for col_idx, col in enumerate(state_list):
             for rev_row_idx, cell in enumerate(col):
                 row_idx = self.rows - rev_row_idx - 1
                 data[row_idx][col_idx] = str(cell)
-        return [''.join(row) for row in data]
+        return ["".join(row) for row in data]
 
     def update_counts(self, counts_dict, key, counts):
         v = counts_dict.get(key, (0, 0, 0))
