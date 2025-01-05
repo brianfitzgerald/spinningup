@@ -1,7 +1,28 @@
-from typing import List
+from typing import List, Tuple
+from abc import ABC, abstractmethod
 
 
-class ConnectFour:
+class BaseGame(ABC):
+    @abstractmethod
+    def __init__(
+        self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
+    ):
+        pass
+
+    @abstractmethod
+    def possible_moves(self, state_int: int) -> List[int]:
+        pass
+
+    @abstractmethod
+    def move(self, state_int: int, col: int, player: int) -> Tuple[int, bool]:
+        pass
+
+    @abstractmethod
+    def render(self, state_int: int) -> List[str]:
+        pass
+
+
+class ConnectFour(BaseGame):
     def __init__(
         self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
     ):

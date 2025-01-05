@@ -20,7 +20,7 @@ Tree uses upper confidence bounds instead of the value of the state
 
 import os
 import random
-import time
+from time import time
 from collections import deque
 
 import fire
@@ -39,20 +39,20 @@ from ptan import (
 )
 from torch.utils.tensorboard.writer import SummaryWriter
 
-PLAY_EPISODES = 1  # 25
-MCTS_SEARCHES = 10
-MCTS_BATCH_SIZE = 8
-REPLAY_BUFFER_SIZE = 5000  # 30000
-LEARNING_RATE = 0.001
+
+# count of recent episodes in the replay buffer
+REPLAY_BUFFER = 128
+
+# this amount of states will be generated, samples are *5 of this size
 BATCH_SIZE = 256
-TRAIN_ROUNDS = 10
-MIN_REPLAY_TO_TRAIN = 2000  # 10000
+TRAIN_ROUNDS = 1
+LEARNING_RATE = 0.001
+TEMP_START = 10
+TEMP_STEP = 0.1
 
-BEST_NET_WIN_RATIO = 0.60
-
-EVALUATE_EVERY_STEP = 100
+BEST_NET_WIN_RATIO = 0.7
+EVALUATE_EVERY_STEP = 10
 EVALUATION_ROUNDS = 20
-STEPS_BEFORE_TAU_0 = 10
 
 
 def evaluate(
@@ -88,128 +88,74 @@ def main(name: str = "mcts"):
     writer = SummaryWriter(comment="-" + name)
 
     game = ConnectFour()
-    net = Net(input_shape=game.obs_shape, actions_n=game.cols, num_filters=16).to(
-        device
-    )
-    best_net = TargetNet(net)
-    print(net)
-
-    optimizer = optim.SGD(net.parameters(), lr=LEARNING_RATE, momentum=0.9)
-
-    assert (
-        MIN_REPLAY_TO_TRAIN >= BATCH_SIZE
-    ), "Replay buffer size should be larger than batch size"
-
     # format is (state, cur_player, probs, result)
-    replay_buffer = deque(maxlen=REPLAY_BUFFER_SIZE)
-    mcts_store = MCTS(game)
+    replay_buffer = deque(maxlen=REPLAY_BUFFER)
     step_idx = 0
     best_idx = 0
 
     with TBMeanTracker(writer, batch_size=10) as tb_tracker:
         while True:
-            t = time.time()
-            prev_nodes = len(mcts_store)
-            game_steps = 0
-            for _ in range(PLAY_EPISODES):
-                # Play a single round of the game - connect 4 or chess
-                _, steps = play_game(
-                    game=game,
-                    mcts_stores=mcts_store,
-                    replay_buffer=replay_buffer,
-                    net1=net,
-                    net2=best_net.target_model,
-                    steps_before_tau_0=STEPS_BEFORE_TAU_0,
-                    mcts_searches=MCTS_SEARCHES,
-                    mcts_batch_size=MCTS_BATCH_SIZE,
-                    device=device,
-                )
-                game_steps += steps
-
-            # Track the speed of the game
-            game_nodes = len(mcts_store) - prev_nodes
-            dt = time.time() - t
-            speed_steps = game_steps / dt
-            speed_nodes = game_nodes / dt
-            tb_tracker.track("speed_steps", speed_steps, step_idx)
-            tb_tracker.track("speed_nodes", speed_nodes, step_idx)
-            logger.info(
-                "Step %d, steps %3d, leaves %4d, steps/s %5.2f, leaves/s %6.2f, best_idx %d, replay buffer len %d"
-                % (
-                    step_idx,
-                    game_steps,
-                    game_nodes,
-                    speed_steps,
-                    speed_nodes,
-                    best_idx,
-                    len(replay_buffer),
-                )
-            )
             step_idx += 1
+            ts = time()
+            score, episode = play_game(best_net, best_net, params, temperature=temperature)
+            print(f"{step_idx}: result {score}, steps={len(episode)}")
+            replay_buffer.append(episode)
+            writer.add_scalar("time_play", time() - ts, step_idx)
+            writer.add_scalar("steps", len(episode), step_idx)
 
-            if len(replay_buffer) < MIN_REPLAY_TO_TRAIN:
-                continue
-
-            # train
-            sum_loss = 0.0
-            sum_value_loss = 0.0
-            sum_policy_loss = 0.0
-
+            # training
+            ts = time()
             for _ in range(TRAIN_ROUNDS):
-                batch = random.sample(replay_buffer, BATCH_SIZE)
-                batch_states, batch_who_moves, batch_probs, batch_values = zip(*batch)
-                batch_states_lists = [
-                    game.decode_binary(state) for state in batch_states
-                ]
-                # get batch of game states
-                states_v = state_lists_to_batch(
-                    batch_states_lists, batch_who_moves, game, device
-                )
+                states_t, actions, policy_tgt, rewards_tgt, values_tgt = \
+                    sample_batch(replay_buffer, BATCH_SIZE, params)
 
                 optimizer.zero_grad()
-                probs_v = torch.FloatTensor(batch_probs).to(device)
-                values_v = torch.FloatTensor(batch_values).to(device)
-                # states_v is (256, 2, 6, 7) - player, then board
-                # different channels per player so the game state is invariant to which player is playing
-                # value head returns the value of every possible action, and a single value float which is the value of the state
-                out_logits_v, out_values_v = net(states_v)
-
-                out_values_v = out_values_v.squeeze(-1)
-                loss_value_v = F.mse_loss(out_values_v, values_v)
-                loss_policy_v = -F.log_softmax(out_logits_v, dim=1) * probs_v
-                loss_policy_v = loss_policy_v.sum(dim=1).mean()
-
-                loss_v = loss_policy_v + loss_value_v
-                loss_v.backward()
+                h_t = net.repr(states_t)
+                loss_p_full_t = None
+                loss_v_full_t = None
+                loss_r_full_t = None
+                for step in range(params.unroll_steps):
+                    policy_t, values_t = net.pred(h_t)
+                    loss_p_t = F.cross_entropy(policy_t, policy_tgt[step])
+                    loss_v_t = F.mse_loss(values_t, values_tgt[step])
+                    # dynamic step
+                    rewards_t, h_t = net.dynamics(h_t, actions[step])
+                    loss_r_t = F.mse_loss(rewards_t, rewards_tgt[step])
+                    if step == 0:
+                        loss_p_full_t = loss_p_t
+                        loss_v_full_t = loss_v_t
+                        loss_r_full_t = loss_r_t
+                    else:
+                        loss_p_full_t += loss_p_t * 0.5
+                        loss_v_full_t += loss_v_t * 0.5
+                        loss_r_full_t += loss_r_t * 0.5
+                loss_full_t = loss_v_full_t + loss_p_full_t + loss_r_full_t
+                loss_full_t.backward()
                 optimizer.step()
-                sum_loss += loss_v.item()
-                sum_value_loss += loss_value_v.item()
-                sum_policy_loss += loss_policy_v.item()
 
-            tb_tracker.track("loss_total", sum_loss / TRAIN_ROUNDS, step_idx)
-            tb_tracker.track("loss_value", sum_value_loss / TRAIN_ROUNDS, step_idx)
-            tb_tracker.track("loss_policy", sum_policy_loss / TRAIN_ROUNDS, step_idx)
+                writer.add_scalar("loss_p", loss_p_full_t.item(), step_idx)
+                writer.add_scalar("loss_v", loss_v_full_t.item(), step_idx)
+                writer.add_scalar("loss_r", loss_r_full_t.item(), step_idx)
+
+
+            writer.add_scalar("time_train", time() - ts, step_idx)
+            writer.add_scalar("temp", temperature, step_idx)
+            temperature = max(0.0, temperature - TEMP_STEP)
 
             # evaluate net
             if step_idx % EVALUATE_EVERY_STEP == 0:
-                win_ratio = evaluate(
-                    net,
-                    best_net.target_model,
-                    rounds=EVALUATION_ROUNDS,
-                    game=game,
-                    device=device,
-                )
-                logger.info("Net evaluated, win ratio = %.2f" % win_ratio)
+                ts = time()
+                win_ratio, avg_steps = evaluate(net, best_net, params)
+                print("Net evaluated, win ratio = %.2f" % win_ratio)
                 writer.add_scalar("eval_win_ratio", win_ratio, step_idx)
+                writer.add_scalar("eval_steps", avg_steps, step_idx)
                 if win_ratio > BEST_NET_WIN_RATIO:
-                    logger.info("Net is better than cur best, sync")
-                    best_net.sync()
+                    print("Net is better than cur best, sync")
+                    best_net.sync(net)
                     best_idx += 1
-                    file_name = os.path.join(
-                        saves_path, f"best_{best_idx}_{win_ratio}_%.3f.dat"
-                    )
-                    torch.save(net.state_dict(), file_name)
-                    mcts_store.clear()
+                    file_name = os.path.join(saves_path, "best_%03d_%05d.dat" % (best_idx, step_idx))
+                    torch.save(best_net.get_state_dict(), file_name)
+                writer.add_scalar("time_eval", time() - ts, step_idx)
 
 
 if __name__ == "__main__":
