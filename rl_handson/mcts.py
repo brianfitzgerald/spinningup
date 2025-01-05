@@ -2,12 +2,12 @@
 Monte-Carlo Tree Search
 """
 
-import typing as tt
 import math as m
+import typing as tt
+
 import numpy as np
 import torch
 import torch.nn.functional as F
-
 from game import ConnectFour
 
 
@@ -242,6 +242,8 @@ class MCTS:
         :return: (probs, values)
         """
         counts = self.visit_count[state_int]
+        # tau is 0, then we select the action with the highest count
+        # it is a deterministic policy
         if tau == 0:
             probs = [0.0] * n_cols
             probs[np.argmax(counts)] = 1.0

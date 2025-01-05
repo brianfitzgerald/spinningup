@@ -97,7 +97,6 @@ def unpack_batch(
 
 
 def main(use_async: bool = False):
-
     device = torch.device(get_device())
 
     env = gym.make_vec(

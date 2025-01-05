@@ -132,7 +132,6 @@ class DiscreteOneHotWrapper(ObservationWrapper):
 
 
 def main(environment: EnvironmentChoice = "CartPole"):
-
     env_name = "CartPole-v1" if environment == "cartpole" else "FrozenLake-v1"
 
     env = gymnasium.make(env_name, render_mode="rgb_array")

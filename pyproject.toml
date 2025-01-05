@@ -21,6 +21,7 @@ dependencies = [
     "pytorch-ignite>=0.5.1",
     "textworld[vis]>=1.6.1",
     "black>=24.10.0",
+    "ruff>=0.8.6",
 ]
 
 [tool.setuptools]

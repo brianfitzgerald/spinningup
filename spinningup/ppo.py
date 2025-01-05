@@ -12,6 +12,7 @@ import gymnasium
 
 # https://medium.com/analytics-vidhya/coding-ppo-from-scratch-with-pytorch-part-1-4-613dfc1b14c8
 
+
 class FeedForwardNN(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, hidden_dim: int = 64):
         super(FeedForwardNN, self).__init__()
@@ -43,8 +44,7 @@ class PPO:
         self.max_timesteps_per_episode = 1600
         self.n_updates_per_iteration = 5
         self.gamma = 0.95
-        self.clip = 0.2        
-
+        self.clip = 0.2
 
         self.render = False
         self.render_every_i = 10
@@ -57,7 +57,7 @@ class PPO:
             "actor_losses": [],  # losses of actor network in current iteration
         }
 
-        self.lr = 0.005 # Learning rate of actor optimizer
+        self.lr = 0.005  # Learning rate of actor optimizer
 
         self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optim = Adam(self.critic.parameters(), lr=self.lr)
@@ -68,7 +68,6 @@ class PPO:
         self.cov_mat = torch.diag(self.cov_var)
 
     def get_action(self, obs):
-
         # actor is the actor network
         # get the actor's mean prediction
         mean = self.actor(obs)
@@ -140,8 +139,7 @@ class PPO:
         batch_rtgs = self.compute_rtgs(batch_rews)
         # Return the batch data
         return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens
-        
-    
+
     def compute_rtgs(self, batch_rews):
         # The rewards-to-go (rtgs) per episode to return.
         # The shape will be (traj_len, 1), where traj_len is the length of the trajectory
@@ -156,7 +154,7 @@ class PPO:
             for rew in reversed(ep_rews):
                 discounted_reward = rew + discounted_reward * self.gamma
                 batch_rtgs.insert(0, discounted_reward)
-        
+
         batch_rtgs = torch.tensor(batch_rtgs, dtype=torch.float)
 
         return batch_rtgs
@@ -165,7 +163,9 @@ class PPO:
         t_so_far = 0
         i_so_far = 0
         while t_so_far < total_timesteps:
-            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.rollout()
+            batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = (
+                self.rollout()
+            )
             # Calculate how many timesteps we collected this batch
             t_so_far += np.sum(batch_lens)
 
@@ -173,8 +173,8 @@ class PPO:
             i_so_far += 1
 
             # Logging timesteps so far and iterations so far
-            self.logger['t_so_far'] = t_so_far
-            self.logger['i_so_far'] = i_so_far
+            self.logger["t_so_far"] = t_so_far
+            self.logger["i_so_far"] = i_so_far
             V, _ = self.evaluate(batch_obs, batch_acts)
             # Calculate advantage for the kth iteration of the algorithm
             # detach since V should not have a gradient
@@ -183,9 +183,7 @@ class PPO:
             # Normalize the advantages
             A_k = (A_k - A_k.mean()) / (A_k.std() + 1e-10)
 
-
             for _ in range(self.n_updates_per_iteration):
-                
                 # calculate V_phi and pi_theta
                 V, curr_log_probs = self.evaluate(batch_obs, batch_acts)
 
@@ -195,12 +193,11 @@ class PPO:
                 # compute surrogate loss for PPO
                 surr1 = ratios * A_k
                 surr2 = torch.clamp(ratios, 1 - self.clip, 1 + self.clip) * A_k
-                
-                # Compute loss. Take the negative min since we're maximizing the objective, but 
+
+                # Compute loss. Take the negative min since we're maximizing the objective, but
                 # Adam minimizes the loss; so minimizing the negative objective maximizes the objective
                 actor_loss = -torch.min(surr1, surr2).mean()
                 critic_loss = F.mse_loss(V, batch_rtgs)
-
 
                 # Calculate gradients and perform backward propagation for actor network
                 self.actor_optim.zero_grad()
@@ -213,7 +210,7 @@ class PPO:
                 self.critic_optim.step()
 
                 # Log actor loss
-                self.logger['actor_losses'].append(actor_loss.item())
+                self.logger["actor_losses"].append(actor_loss.item())
 
             print(self.logger)
 
@@ -227,6 +224,7 @@ class PPO:
         log_probs = dist.log_prob(batch_acts)
 
         return V, log_probs
+
 
 if __name__ == "__main__":
     env = gymnasium.make("Pendulum-v1")

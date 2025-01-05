@@ -125,7 +125,6 @@ TEST_EPISODES = 20
 
 
 def main(q_iteration=True):
-
     env = gymnasium.make(ENV_NAME, render_mode="rgb_array")
     env = RecordVideo(env, video_folder=f"videos/chapter_5")
     agent = Agent(env, q_iteration)

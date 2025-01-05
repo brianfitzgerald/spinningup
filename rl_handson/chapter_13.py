@@ -80,7 +80,9 @@ PARAMS = {
 }
 
 
-def get_games_spaces(game_files: tt.List[str]) -> tt.Tuple[
+def get_games_spaces(
+    game_files: tt.List[str],
+) -> tt.Tuple[
     tt.Dict[int, str],
     Space,
     Space,

@@ -362,12 +362,14 @@ def get_device() -> str:
     return (
         "cuda"
         if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
     )
 
 
 class RewardTracker:
-    def __init__(self, writer: SummaryWriter, stop_reward = sys.maxsize):
+    def __init__(self, writer: SummaryWriter, stop_reward=sys.maxsize):
         self.writer = writer
         self.stop_reward = stop_reward
 

@@ -345,7 +345,7 @@ class ExperienceSourceFirstLast(ExperienceSource):
         self.gamma = gamma
         self.steps = steps_count
 
-    def __iter__(self) -> tt.Generator[ExperienceFirstLast, None, None]: # type: ignore
+    def __iter__(self) -> tt.Generator[ExperienceFirstLast, None, None]:  # type: ignore
         for exp in super(ExperienceSourceFirstLast, self).__iter__():
             if exp[-1].done_trunc and len(exp) <= self.steps:
                 last_state = None

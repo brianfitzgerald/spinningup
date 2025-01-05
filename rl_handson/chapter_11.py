@@ -69,7 +69,6 @@ def calc_qvals(rewards: tt.List[float]) -> tt.List[float]:
 
 
 def main():
-
     env = gym.make("CartPole-v1", render_mode="rgb_array")
     writer = SummaryWriter(comment="-cartpole-reinforce")
     env = RecordVideo(env, video_folder=f"videos/chapter_11/cartpole")

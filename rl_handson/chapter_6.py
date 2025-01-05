@@ -94,7 +94,6 @@ class ImageToPyTorch(ObservationWrapper):
 
 
 class DQN(nn.Module):
-
     def __init__(self, input_shape: tuple[int, int], n_actions: int):
         super(DQN, self).__init__()
 
@@ -246,7 +245,6 @@ EPSILON_FINAL = 0.01
 def calc_loss(
     batch: List[Experience], net: DQN, tgt_net: DQN, device: torch.device
 ) -> torch.Tensor:
-
     # Get experiences as batch of tensors
     states_t, actions_t, rewards_t, dones_t, new_states_t = batch_to_tensors(
         batch, device
@@ -268,7 +266,6 @@ def calc_loss(
 
 
 def main(env_name: str = DEFAULT_ENV_NAME):
-
     device = torch.device(get_device())
 
     env = gymnasium.make(env_name, render_mode="rgb_array")

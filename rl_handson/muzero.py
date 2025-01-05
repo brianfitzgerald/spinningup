@@ -1,12 +1,11 @@
 from collections import deque
-import torch
-import torch.nn as nn
+from typing import List, Optional, Union
 
 import numpy as np
-from typing import List, Union, Optional
-
-from mcts import MCTS
+import torch
+import torch.nn as nn
 from game import ConnectFour
+from mcts import MCTS
 
 
 class Net(nn.Module):
@@ -125,6 +124,7 @@ def play_game(
     net1_result = None
 
     while result is None:
+        # perform MCTS search for the current player
         mcts_stores[cur_player].search_batch(
             mcts_searches,
             mcts_batch_size,
@@ -133,6 +133,7 @@ def play_game(
             nets[cur_player],
             device=device,
         )
+        # get the probabilities from the MCTS
         probs, _ = mcts_stores[cur_player].get_policy_value(
             state, tau=tau, n_cols=game.cols
         )

@@ -39,7 +39,6 @@ def train(
     render: bool = False,
     rtg: bool = True,
 ):
-
     # make environment, check spaces, get obs / act dims
     render_mode = "human" if render else "rgb_array"
     base_env = gymnasium.make(env_name, render_mode=render_mode)
@@ -94,7 +93,6 @@ def train(
 
         # collect experience by acting in the environment with current policy
         while True:
-
             # rendering
             if (not finished_rendering_this_epoch) and render:
                 env.render()

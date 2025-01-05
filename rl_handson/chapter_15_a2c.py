@@ -27,7 +27,6 @@ def calc_logprob(mu_v: torch.Tensor, var_v: torch.Tensor, actions_v: torch.Tenso
 
 
 def main(env_id: str = "cheetah", envs_count: int = 1):
-
     device_name = get_device()
     device = torch.device(device_name)
 

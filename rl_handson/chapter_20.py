@@ -46,27 +46,26 @@ So basic flow is to play games with MCTS, record transitions, then train on thos
 
 """
 
-from collections import deque
 import os
 import random
 import time
+from collections import deque
 
 import fire
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
+from game import ConnectFour
 from lib import ensure_directory, get_device
+from loguru import logger
+from mcts import MCTS, state_lists_to_batch
+from muzero import Net, play_game
 from ptan import (
     TargetNet,
     TBMeanTracker,
 )
 from torch.utils.tensorboard.writer import SummaryWriter
-import torch.nn.functional as F
-from loguru import logger
-
-from muzero import Net, play_game
-from game import ConnectFour
-from mcts import MCTS, state_lists_to_batch
-import torch.nn as nn
 
 PLAY_EPISODES = 1  # 25
 MCTS_SEARCHES = 10
@@ -75,7 +74,7 @@ REPLAY_BUFFER_SIZE = 5000  # 30000
 LEARNING_RATE = 0.001
 BATCH_SIZE = 256
 TRAIN_ROUNDS = 10
-MIN_REPLAY_TO_TRAIN = 256  # 10000
+MIN_REPLAY_TO_TRAIN = 2000  # 10000
 
 BEST_NET_WIN_RATIO = 0.60
 
@@ -125,7 +124,9 @@ def main(name: str = "mcts"):
 
     optimizer = optim.SGD(net.parameters(), lr=LEARNING_RATE, momentum=0.9)
 
-    assert MIN_REPLAY_TO_TRAIN >= BATCH_SIZE, "Replay buffer size should be larger than batch size"
+    assert (
+        MIN_REPLAY_TO_TRAIN >= BATCH_SIZE
+    ), "Replay buffer size should be larger than batch size"
 
     # format is (state, cur_player, probs, result)
     replay_buffer = deque(maxlen=REPLAY_BUFFER_SIZE)

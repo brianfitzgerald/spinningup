@@ -1,5 +1,6 @@
 from typing import List
 
+
 class ConnectFour:
     def __init__(
         self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
