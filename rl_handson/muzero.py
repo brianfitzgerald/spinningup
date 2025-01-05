@@ -6,6 +6,7 @@ import numpy as np
 from typing import List, Union, Optional
 
 from mcts import MCTS
+from game import ConnectFour
 
 
 class Net(nn.Module):
@@ -72,10 +73,11 @@ class Net(nn.Module):
 
 
 def play_game(
+    game: ConnectFour,
     mcts_stores: Optional[Union[MCTS, List[MCTS]]],
     replay_buffer: Optional[deque],
-    net1: Net,
-    net2: Net,
+    net1: nn.Module,
+    net2: nn.Module,
     steps_before_tau_0: int,
     mcts_searches: int,
     mcts_batch_size: int,
@@ -91,11 +93,11 @@ def play_game(
     :return: value for the game in respect to player1 (+1 if p1 won, -1 if lost, 0 if draw)
     """
     if mcts_stores is None:
-        mcts_stores = [MCTS(), MCTS()]
+        mcts_stores = [MCTS(game), MCTS(game)]
     elif isinstance(mcts_stores, MCTS):
         mcts_stores = [mcts_stores, mcts_stores]
 
-    state = game.INITIAL_STATE
+    state = game.initial_state
     nets = [net1, net2]
     if net1_plays_first is None:
         cur_player = np.random.choice(2)
@@ -117,9 +119,9 @@ def play_game(
             nets[cur_player],
             device=device,
         )
-        probs, _ = mcts_stores[cur_player].get_policy_value(state, tau=tau)
+        probs, _ = mcts_stores[cur_player].get_policy_value(state, tau=tau, n_cols=game.cols)
         game_history.append((state, cur_player, probs))
-        action = np.random.choice(game.GAME_COLS, p=probs)
+        action = np.random.choice(game.cols, p=probs)
         if action not in game.possible_moves(state):
             print("Impossible action selected")
         state, won = game.move(state, action, cur_player)

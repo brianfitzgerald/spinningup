@@ -73,7 +73,6 @@ class MCTS:
         # prior probability of actions, state_int -> [P(s,a)]
         self.probs: tt.Dict[int, tt.List[float]] = {}
         self.game = game
-        self.obs_shape = (2, game.rows, game.cols)
 
     def _encode_list_state(
         self, dest_np: np.ndarray, state_list: tt.List[tt.List[int]], who_move: int
@@ -84,7 +83,7 @@ class MCTS:
         :param state_list: state of the game in the list form
         :param who_move: player index (game.PLAYER_WHITE or game.PLAYER_BLACK) who to move
         """
-        assert dest_np.shape == self.obs_shape
+        assert dest_np.shape == self.game.obs_shape
 
         for col_idx, col in enumerate(state_list):
             for rev_row_idx, cell in enumerate(col):
@@ -193,7 +192,7 @@ class MCTS:
         # do expansion of nodes
         if expand_queue:
             batch_v = state_lists_to_batch(
-                expand_states, expand_players, self.game, device
+                expand_states, expand_players, self.game, device, self.game.obs_shape
             )
             logits_v, values_v = net(batch_v)
             probs_v = F.softmax(logits_v, dim=1)

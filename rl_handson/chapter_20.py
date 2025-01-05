@@ -62,7 +62,8 @@ import torch.nn.functional as F
 
 from muzero import Net, play_game
 from game import ConnectFour
-from mcts import MCTS
+from mcts import MCTS, state_lists_to_batch
+import torch.nn as nn
 
 PLAY_EPISODES = 1  # 25
 MCTS_SEARCHES = 10
@@ -80,12 +81,15 @@ EVALUATION_ROUNDS = 20
 STEPS_BEFORE_TAU_0 = 10
 
 
-def evaluate(net1: Net, net2: Net, rounds: int, game: ConnectFour, device: str):
+def evaluate(
+    net1: nn.Module, net2: nn.Module, rounds: int, game: ConnectFour, device: str
+):
     n1_win, n2_win = 0, 0
     mcts_stores = [MCTS(game), MCTS(game)]
 
     for r_idx in range(rounds):
         r, _ = play_game(
+            game=game,
             mcts_stores=mcts_stores,
             replay_buffer=None,
             net1=net1,
@@ -95,6 +99,7 @@ def evaluate(net1: Net, net2: Net, rounds: int, game: ConnectFour, device: str):
             mcts_batch_size=16,
             device=device,
         )
+        assert r is not None
         if r < -0.5:
             n2_win += 1
         elif r > 0.5:
@@ -109,7 +114,9 @@ def main(name: str = "mcts"):
     writer = SummaryWriter(comment="-" + name)
 
     game = ConnectFour()
-    net = Net(input_shape=game.obs_shape, actions_n=game.cols).to(device)
+    net = Net(input_shape=game.obs_shape, actions_n=game.cols, num_filters=16).to(
+        device
+    )
     best_net = TargetNet(net)
     print(net)
 
@@ -127,10 +134,11 @@ def main(name: str = "mcts"):
             game_steps = 0
             for _ in range(PLAY_EPISODES):
                 _, steps = play_game(
-                    mcts_store,
-                    replay_buffer,
-                    best_net.target_model,
-                    best_net.target_model,
+                    game=game,
+                    mcts_stores=mcts_store,
+                    replay_buffer=replay_buffer,
+                    net1=net,
+                    net2=best_net.target_model,
                     steps_before_tau_0=STEPS_BEFORE_TAU_0,
                     mcts_searches=MCTS_SEARCHES,
                     mcts_batch_size=MCTS_BATCH_SIZE,
@@ -171,7 +179,7 @@ def main(name: str = "mcts"):
                 batch_states_lists = [
                     game.decode_binary(state) for state in batch_states
                 ]
-                states_v = mcts_store.state_lists_to_batch(
+                states_v = state_lists_to_batch(
                     batch_states_lists, batch_who_moves, game, device
                 )
 
@@ -198,7 +206,11 @@ def main(name: str = "mcts"):
             # evaluate net
             if step_idx % EVALUATE_EVERY_STEP == 0:
                 win_ratio = evaluate(
-                    net, best_net.target_model, rounds=EVALUATION_ROUNDS, game=game, device=device
+                    net,
+                    best_net.target_model,
+                    rounds=EVALUATION_ROUNDS,
+                    game=game,
+                    device=device,
                 )
                 print("Net evaluated, win ratio = %.2f" % win_ratio)
                 writer.add_scalar("eval_win_ratio", win_ratio, step_idx)

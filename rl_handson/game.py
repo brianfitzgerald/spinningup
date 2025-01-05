@@ -11,6 +11,8 @@ class ConnectFour:
         self.player_black = 1
         self.player_white = 0
         self.initial_state = self.encode_lists([[]] * self.cols)
+        # 2 channels: 0 for empty, 1 for black, 2 for white
+        self.obs_shape = (2, self.rows, self.cols)
 
     def bits_to_int(self, bits) -> int:
         res = 0

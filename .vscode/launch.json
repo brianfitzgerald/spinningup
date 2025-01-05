@@ -2,6 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Chapter 20",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rl_handson/chapter_20.py",
+            "console": "integratedTerminal",
+            "args": [
+                // "--checkpoint",
+                // "best_halfcheetah_ch16.dat"
+            ]
+        },
+        {
             "name": "Chapter 16",
             "type": "debugpy",
             "request": "launch",
