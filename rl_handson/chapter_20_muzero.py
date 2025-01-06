@@ -22,15 +22,14 @@ import os
 from time import time
 from collections import deque
 from itertools import chain
+from typing import Tuple
+import fire
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from game import ConnectFour
+from game import BaseGame, ConnectFour
 from lib import ensure_directory, get_device
-from mcts import MCTS
-from rl_handson.alphazero import play_game
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from muzero import sample_batch, play_game, MuZeroModels, MuZeroParams
@@ -52,33 +51,27 @@ EVALUATION_ROUNDS = 20
 
 
 def evaluate(
-    net1: nn.Module, net2: nn.Module, rounds: int, game: ConnectFour, device: str
-):
+    net1: MuZeroModels, net2: MuZeroModels, params: MuZeroParams, game: BaseGame
+) -> Tuple[float, float]:
     n1_win, n2_win = 0, 0
-    mcts_stores = [MCTS(game), MCTS(game)]
+    rewards = []
+    sum_steps = 0
 
-    for r_idx in range(rounds):
-        r, _ = play_game(
-            game=game,
-            mcts_stores=mcts_stores,
-            replay_buffer=None,
-            net1=net1,
-            net2=net2,
-            steps_before_tau_0=0,
-            mcts_searches=20,
-            mcts_batch_size=16,
-            device=device,
-        )
-        assert r is not None
+    for r_idx in range(EVALUATION_ROUNDS):
+        r, e = play_game(net1, net2, params, temperature=0, game=game)
+        sum_steps += len(e)
         if r < -0.5:
             n2_win += 1
         elif r > 0.5:
             n1_win += 1
-    return n1_win / (n1_win + n2_win)
+        rewards.append(r)
+    print(f"Eval rewards: {rewards}, steps={sum_steps / EVALUATION_ROUNDS}")
+    return n1_win / (n1_win + n2_win), sum_steps / EVALUATION_ROUNDS
 
 
 def main(name: str = "mcts"):
-    device = torch.device(get_device())
+    device_str = get_device()
+    device = torch.device(device_str)
     saves_path = os.path.join("saves", name)
     ensure_directory(saves_path)
     writer = SummaryWriter(comment="-" + name)
@@ -91,7 +84,7 @@ def main(name: str = "mcts"):
     best_net = MuZeroModels(game.obs_shape, game.cols, hidden_size)
     best_net.to(device)
     max_moves = game.rows * game.cols >> 2 + 1
-    params = MuZeroParams(game.cols, max_moves, dev=device)
+    params = MuZeroParams(game.cols, max_moves, device_str)
 
     optimizer = optim.SGD(
         chain(
@@ -111,7 +104,9 @@ def main(name: str = "mcts"):
     while True:
         step_idx += 1
         ts = time()
-        score, episode = play_game(best_net, best_net, params, temperature=temperature)
+        score, episode = play_game(
+            best_net, best_net, params, temperature=temperature, game=game
+        )
         print(f"{step_idx}: result {score}, steps={len(episode)}")
         replay_buffer.append(episode)
         writer.add_scalar("time_play", time() - ts, step_idx)
@@ -121,7 +116,7 @@ def main(name: str = "mcts"):
         ts = time()
         for _ in range(TRAIN_ROUNDS):
             states_t, actions, policy_tgt, rewards_tgt, values_tgt = sample_batch(
-                replay_buffer, BATCH_SIZE, params
+                replay_buffer, BATCH_SIZE, params, game
             )
 
             optimizer.zero_grad()
@@ -160,7 +155,7 @@ def main(name: str = "mcts"):
         # evaluate net
         if step_idx % EVALUATE_EVERY_STEP == 0:
             ts = time()
-            win_ratio, avg_steps = evaluate(net, best_net, params)
+            win_ratio, avg_steps = evaluate(net, best_net, params, game)
             print("Net evaluated, win ratio = %.2f" % win_ratio)
             writer.add_scalar("eval_win_ratio", win_ratio, step_idx)
             writer.add_scalar("eval_steps", avg_steps, step_idx)
@@ -173,3 +168,7 @@ def main(name: str = "mcts"):
                 )
                 torch.save(best_net.get_state_dict(), file_name)
             writer.add_scalar("time_eval", time() - ts, step_idx)
+
+
+if __name__ == "__main__":
+    fire.Fire(main)

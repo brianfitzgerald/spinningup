@@ -1,17 +1,15 @@
-from typing import Dict, Tuple
-
-import torch
-import torch.nn as nn
-from dataclasses import dataclass
 import math as m
 import typing as tt
+from dataclasses import dataclass
+from typing import Dict, Tuple
+
 import numpy as np
 import torch
 import torch.nn as nn
+from game import BaseGame
 
 # reuse function as net input matches
 from mcts import state_lists_to_batch
-from game import ConnectFour
 
 Action = int
 
@@ -29,6 +27,7 @@ class MuZeroParams:
     # derived from game params
     actions_count: int
     max_moves: int
+    device: str
 
     dirichlet_alpha: float = 0.3
     discount: float = 1.0
@@ -38,8 +37,6 @@ class MuZeroParams:
     # UCB formula
     pb_c_base: int = 19652
     pb_c_init: float = 1.25
-
-    dev: torch.device = torch.device("cpu")
 
 
 class MinMaxStats:
@@ -65,6 +62,7 @@ class MCTSNode:
         self.prior = prior
         self.children: tt.Dict[Action, MCTSNode] = {}
         # node is not expanded, so has no hidden state
+        # This is an encoded hidden state, encoded by the representation model
         self.h = None
         # predicted reward
         self.r = 0.0
@@ -87,6 +85,8 @@ class MCTSNode:
                 max_ucb = ucb
                 best_action = action
                 best_node = node
+        assert best_action is not None
+        assert best_node is not None
         return best_action, best_node
 
     def get_act_probs(self, t: float = 1) -> tt.List[float]:
@@ -325,11 +325,13 @@ def make_expanded_root(
     params: MuZeroParams,
     models: MuZeroModels,
     min_max: MinMaxStats,
-    game: ConnectFour
+    game: BaseGame,
 ) -> MCTSNode:
     root = MCTSNode(1.0, player_idx == 0)
     state_list = game.decode_binary(game_state_int)
-    state_t = state_lists_to_batch([state_list], [player_idx], device=params.dev)
+    state_t = state_lists_to_batch(
+        [state_list], [player_idx], game, device=params.device
+    )
     h_t = models.repr(state_t)
     root.h = h_t[0].cpu().numpy()
 
@@ -349,6 +351,45 @@ def make_expanded_root(
     return root
 
 
+def expand_node(
+    parent: MCTSNode,
+    node: MCTSNode,
+    last_action: Action,
+    params: MuZeroParams,
+    models: MuZeroModels,
+) -> float:
+    """
+    Performs node expansion using models.
+    Return predicted value for the node's state.
+    :param parent: parent's node
+    :param node: node to be expanded
+    :param action: action from the parent's node
+    :param params: hyperparams
+    :param models: models
+    :return: predicted value to be backpropagated
+    """
+    h_t = torch.as_tensor(parent.h, dtype=torch.float32, device=params.device)
+    h_t.unsqueeze_(0)
+    p_t, v_t = models.pred(h_t)
+    # one-hot of actions
+    a_t = torch.zeros(params.actions_count, dtype=torch.float32, device=params.device)
+    a_t[last_action] = 1.0
+    a_t.unsqueeze_(0)
+    # predict the reward and the next hidden state
+    r_t, h_next_t = models.dynamics(h_t, a_t)
+    node.h = h_next_t[0].cpu().numpy()
+    node.r = float(r_t[0].cpu().item())
+
+    # convert logits to probs
+    p_t.squeeze_(0)
+    p_t.exp_()
+    probs_t = p_t / p_t.sum()
+    probs = probs_t.cpu().numpy()
+    for a, prob in enumerate(probs):
+        node.children[a] = MCTSNode(prob, not node.first_plays)
+    return float(v_t.cpu().item())
+
+
 @torch.no_grad()
 def run_mcts(
     player_idx: int,
@@ -356,10 +397,11 @@ def run_mcts(
     params: MuZeroParams,
     models: MuZeroModels,
     min_max: MinMaxStats,
+    game: BaseGame,
     search_rounds: int = 800,
 ) -> MCTSNode:
     # prepare root node
-    root = make_expanded_root(player_idx, root_state_int, params, models, min_max)
+    root = make_expanded_root(player_idx, root_state_int, params, models, min_max, game)
     for _ in range(search_rounds):
         search_path = [root]
         parent_node = None
@@ -371,6 +413,7 @@ def run_mcts(
             parent_node = node
             node = new_node
             search_path.append(new_node)
+        assert parent_node is not None
         value = expand_node(parent_node, node, last_action, params, models)
         backpropagate(search_path, value, node.first_plays, params, min_max)
     return root
@@ -382,10 +425,11 @@ def play_game(
     player2: MuZeroModels,
     params: MuZeroParams,
     temperature: float,
+    game: BaseGame,
     init_state: tt.Optional[int] = None,
 ) -> tt.Tuple[int, Episode]:
     episode = Episode()
-    state = game.INITIAL_STATE if init_state is None else init_state
+    state = game.initial_state if init_state is None else init_state
     players = [player1, player2]
     player_idx = 0
     reward = 0
@@ -397,7 +441,9 @@ def play_game(
         if not possible_actions:
             break
 
-        root_node = run_mcts(player_idx, state, params, players[player_idx], min_max)
+        root_node = run_mcts(
+            player_idx, state, params, players[player_idx], min_max, game
+        )
         # run_mcts(node, action, params, players[player_idx])
         action = root_node.select_action(temperature, params)
 
@@ -424,6 +470,7 @@ def sample_batch(
     episode_buffer: tt.Deque[Episode],
     batch_size: int,
     params: MuZeroParams,
+    game: BaseGame,
 ) -> tt.Tuple[
     torch.Tensor,
     tt.Tuple[torch.Tensor, ...],
@@ -449,7 +496,7 @@ def sample_batch(
     rewards = [[] for _ in range(params.unroll_steps)]
     values = [[] for _ in range(params.unroll_steps)]
 
-    for episode in np.random.choice(episode_buffer, batch_size):
+    for episode in np.random.choice(episode_buffer, batch_size):  # type: ignore
         assert isinstance(episode, Episode)
         ofs = np.random.choice(len(episode) - params.unroll_steps)
         state = game.decode_binary(episode.steps[ofs].state)
@@ -468,21 +515,21 @@ def sample_batch(
                 value *= params.discount
                 value += step.reward
             values[s].append(value)
-    states_t = state_lists_to_batch(states, player_indices, device=params.dev)
+    states_t = state_lists_to_batch(states, player_indices, game, device=params.device)
     res_actions = tuple(
         torch.as_tensor(
-            np.eye(params.actions_count)[a], dtype=torch.float32, device=params.dev
+            np.eye(params.actions_count)[a], dtype=torch.float32, device=params.device
         )
         for a in actions
     )
     res_policies = tuple(
-        torch.as_tensor(p, dtype=torch.float32, device=params.dev)
+        torch.as_tensor(p, dtype=torch.float32, device=params.device)
         for p in policy_targets
     )
     res_rewards = tuple(
-        torch.as_tensor(r, dtype=torch.float32, device=params.dev) for r in rewards
+        torch.as_tensor(r, dtype=torch.float32, device=params.device) for r in rewards
     )
     res_values = tuple(
-        torch.as_tensor(v, dtype=torch.float32, device=params.dev) for v in values
+        torch.as_tensor(v, dtype=torch.float32, device=params.device) for v in values
     )
     return states_t, res_actions, res_policies, res_rewards, res_values

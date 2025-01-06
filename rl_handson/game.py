@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from abc import ABC, abstractmethod
 
 
@@ -7,7 +7,13 @@ class BaseGame(ABC):
     def __init__(
         self, rows: int = 6, cols: int = 7, bits_in_len: int = 3, count_to_win: int = 4
     ):
-        pass
+        self.initial_state = 0
+        self.rows = rows
+        self.cols = cols
+        self.bits_in_len = bits_in_len
+        self.count_to_win = count_to_win
+        self.player_black = 1
+        self.player_white = 0
 
     @abstractmethod
     def possible_moves(self, state_int: int) -> List[int]:
@@ -19,6 +25,10 @@ class BaseGame(ABC):
 
     @abstractmethod
     def render(self, state_int: int) -> List[str]:
+        pass
+
+    @abstractmethod
+    def decode_binary(self, state_int) -> Any:
         pass
 
 

@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Chapter 20",
+            "name": "Chapter 20 - AlphaZero",
             "type": "debugpy",
             "request": "launch",
-            "program": "rl_handson/chapter_20.py",
+            "program": "rl_handson/chapter_20_alphazero.py",
             "console": "integratedTerminal",
             "args": [
                 // "--checkpoint",

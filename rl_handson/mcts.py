@@ -8,7 +8,7 @@ import typing as tt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from game import ConnectFour
+from game import BaseGame, ConnectFour
 
 
 def _encode_list_state(
@@ -38,7 +38,7 @@ def _encode_list_state(
 def state_lists_to_batch(
     state_lists: tt.List[tt.List[tt.List[int]]],
     who_moves_lists: tt.List[int],
-    game: ConnectFour,
+    game: BaseGame,
     device: str = "cpu",
     obs_shape: tuple[int, int, int] = (2, 6, 7),
 ) -> torch.Tensor:
