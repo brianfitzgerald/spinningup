@@ -1217,6 +1217,23 @@ wheels = [
 ]
 
 [[package]]
+name = "nle"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "gymnasium" },
+    { name = "numpy" },
+    { name = "pybind11" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/00/eb265c9cc99ca87c4427db102f8288f600b47c48a81b19dfd1febe8b15f1/nle-1.1.0.tar.gz", hash = "sha256:3d6cd3d799181cf8bba6760b5d0cacb8886538b2a28943a79ca72afdcc4e0e3b", size = 7434616 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/87/3c3b8762e4e3e2ae1d2fac17e7f980917fe5e35631ce6f3a7b579d7758f3/nle-1.1.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ffc6a02228979c84c8205e4a1921364d2324a1e6f7c6225ec4413b6d9bcfd7c1", size = 3050707 },
+    { url = "https://files.pythonhosted.org/packages/64/d5/680f7fd0d013977ce83b3f5acd28f84ed0bad80c7195edcb907f52433729/nle-1.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b793546d797297e4e092de743e8c0d8caea017f9327ebd724a7f678c2b2604e8", size = 3100328 },
+    { url = "https://files.pythonhosted.org/packages/7e/0f/87c1be6e529c3b428534d694b34066c66febc55bf7e9aea3c13cbcf498b6/nle-1.1.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:fd862b917dc0296f2c9a4a3888885c88bcb75b95413a6a2cd8fc0503e9b270f5", size = 3044355 },
+    { url = "https://files.pythonhosted.org/packages/fe/e1/0effec27135d0bd87613ff62be7a22fe2a5ca6107557f5b3e9cb7296672a/nle-1.1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:16026327c513f8d76dc8362a9cc21743ad4654a799ecab38c044cb4a8fef936f", size = 3095536 },
+]
+
+[[package]]
 name = "numpy"
 version = "1.26.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1621,6 +1638,15 @@ dependencies = [
     { name = "pymeta3" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ec/1a/2fb847db017f9f89ab8519d96e35fb3dacb6170a0643fddba3b366af0af1/pybars3-0.9.7.tar.gz", hash = "sha256:6ac847e905e53b9c5b936af112c910475e27bf767f79f4528c16f9af1ec0e252", size = 29203 }
+
+[[package]]
+name = "pybind11"
+version = "2.13.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/c1/72b9622fcb32ff98b054f724e213c7f70d6898baa714f4516288456ceaba/pybind11-2.13.6.tar.gz", hash = "sha256:ba6af10348c12b24e92fa086b39cfba0eff619b61ac77c406167d813b096d39a", size = 218403 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/2f/0f24b288e2ce56f51c920137620b4434a38fd80583dbbe24fc2a1656c388/pybind11-2.13.6-py3-none-any.whl", hash = "sha256:237c41e29157b962835d356b370ededd57594a26d5894a795960f0047cb5caf5", size = 243282 },
+]
 
 [[package]]
 name = "pycparser"
@@ -2075,6 +2101,7 @@ dependencies = [
     { name = "gymnasium", extra = ["classic-control", "mujoco", "other"] },
     { name = "ipython" },
     { name = "loguru" },
+    { name = "nle" },
     { name = "opencv-python" },
     { name = "pytorch-ignite" },
     { name = "ruff" },
@@ -2094,6 +2121,7 @@ requires-dist = [
     { name = "gymnasium", extras = ["classic-control", "other", "mujoco"], specifier = ">=1.0.0" },
     { name = "ipython", specifier = ">=8.30.0" },
     { name = "loguru", specifier = ">=0.7.3" },
+    { name = "nle", specifier = ">=1.1.0" },
     { name = "opencv-python", specifier = ">=4.10.0.84" },
     { name = "pytorch-ignite", specifier = ">=0.5.1" },
     { name = "ruff", specifier = ">=0.8.6" },

@@ -5,6 +5,6 @@ Standalone RL learning projects
 ### Installation
 
 ```bash
-sudo apt-get install make cmake clang -y
+brew install make cmake
 uv sync
 ```
